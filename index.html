@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>새암 가계부</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#15803d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="application-name" content="새암 가계부">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{
+  --ink:#1c1917; --sub:#78716c; --line:#e7e5e4; --bg:#fafaf9; --card:#ffffff;
+  --in:#2563eb; --out:#dc2626; --asset:#0891b2; --debt:#ea580c;
+  --personal:#15803d; --corp:#1e3a8a; --warn:#dc2626; --ok:#16a34a;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:'Pretendard','Apple SD Gothic Neo','Noto Sans KR',-apple-system,BlinkMacSystemFont,sans-serif;
+  font-size:15px;line-height:1.5;padding-bottom:76px}
+#app{max-width:520px;margin:0 auto;background:var(--bg);min-height:100vh}
+
+/* ── header ── */
+header{position:sticky;top:0;z-index:20;background:var(--card);border-bottom:1px solid var(--line);
+  padding:10px 14px;display:flex;align-items:center;gap:10px;
+  padding-top:calc(10px + env(safe-area-inset-top))}
+#installBar{display:none;background:var(--personal);color:#fff;padding:11px 14px;
+  align-items:center;gap:10px;font-size:13.5px;font-weight:700}
+#installBar.show{display:flex}
+#installBar button{margin-left:auto;border:0;background:#fff;color:var(--personal);
+  padding:7px 14px;border-radius:8px;font-size:13px;font-weight:800;font-family:inherit;cursor:pointer}
+#installBar .x{background:transparent;color:#fff;padding:7px 4px;margin-left:0;font-size:16px}
+.modeToggle{display:flex;background:#f5f5f4;border-radius:999px;padding:3px;flex:0 0 auto}
+.modeToggle button{border:0;background:transparent;padding:6px 14px;border-radius:999px;
+  font-size:13px;font-weight:700;color:var(--sub);cursor:pointer;transition:.15s}
+.modeToggle button.on{background:var(--personal);color:#fff}
+body.corp .modeToggle button.on{background:var(--corp)}
+.monthNav{margin-left:auto;display:flex;align-items:center;gap:4px}
+.monthNav button{border:0;background:#f5f5f4;width:28px;height:28px;border-radius:8px;
+  cursor:pointer;font-size:14px;color:var(--sub)}
+.monthNav span{font-weight:700;font-size:14px;min-width:78px;text-align:center}
+
+/* ── layout ── */
+main{padding:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.card h3{margin:0 0 10px;font-size:13px;font-weight:800;color:var(--sub);letter-spacing:.02em}
+.row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;font-size:14px}
+.row+.row{border-top:1px solid #f5f5f4}
+.row .lbl{color:var(--sub)}
+.row .val{font-weight:700;font-variant-numeric:tabular-nums}
+.row.total{border-top:2px solid var(--ink);margin-top:4px;padding-top:9px;font-size:15px}
+.row.total .lbl{color:var(--ink);font-weight:800}
+.in{color:var(--in)} .out{color:var(--out)} .asset{color:var(--asset)} .debt{color:var(--debt)}
+.muted{color:var(--sub);font-size:12px}
+.empty{text-align:center;color:var(--sub);font-size:13px;padding:22px 0}
+
+/* ── 부자아빠 현금흐름 다이어그램 ── */
+.cf{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.cfTitle{font-size:13px;font-weight:800;color:var(--sub);margin-bottom:12px}
+.cfBox{border:2px solid var(--ink);border-radius:10px;overflow:hidden;margin-bottom:0}
+.cfBox .cfHead{background:var(--ink);color:#fff;font-size:11px;font-weight:800;padding:4px 9px;letter-spacing:.04em}
+.cfHalf{padding:9px 11px}
+.cfHalf+.cfHalf{border-top:1px dashed var(--line)}
+.cfHalf .t{font-size:11px;font-weight:800;margin-bottom:5px}
+.cfItem{display:flex;justify-content:space-between;font-size:12.5px;padding:2px 0;color:var(--sub)}
+.cfItem b{font-variant-numeric:tabular-nums;color:var(--ink);font-weight:600}
+.cfArrow{display:flex;align-items:center;justify-content:center;gap:8px;padding:5px 0;font-size:11px;color:var(--sub)}
+.cfArrow .a{font-size:15px;line-height:1}
+.freedom{margin-top:12px;padding:11px;border-radius:10px;background:#f0fdf4;border:1px solid #bbf7d0}
+body.corp .freedom{background:#eff6ff;border-color:#bfdbfe}
+.freedom .fTop{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:7px}
+.bar{height:9px;background:#e7e5e4;border-radius:999px;overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--ok);border-radius:999px;transition:.4s}
+
+/* ── forms ── */
+label{display:block;font-size:12px;font-weight:700;color:var(--sub);margin:10px 0 4px}
+input,select,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;
+  font-size:15px;font-family:inherit;background:#fff;color:var(--ink)}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--personal);outline-offset:-1px}
+body.corp input:focus,body.corp select:focus,body.corp textarea:focus{outline-color:var(--corp)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btn{width:100%;padding:12px;border:0;border-radius:10px;background:var(--personal);color:#fff;
+  font-size:15px;font-weight:800;cursor:pointer;margin-top:14px;font-family:inherit}
+body.corp .btn{background:var(--corp)}
+.btn.sub{background:#f5f5f4;color:var(--ink);font-weight:700;font-size:13px;padding:9px;margin-top:8px}
+.btn.danger{background:#fef2f2;color:var(--out)}
+.segRow{display:flex;gap:6px;margin-top:4px}
+.segRow button{flex:1;padding:9px;border:1px solid var(--line);background:#fff;border-radius:9px;
+  font-size:13px;font-weight:700;color:var(--sub);cursor:pointer;font-family:inherit}
+.segRow button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+/* ── list ── */
+.item{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid #f5f5f4}
+.item:last-child{border-bottom:0}
+.item .ic{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+  font-size:11px;font-weight:800;flex:0 0 auto;color:#fff}
+.item .mid{flex:1;min-width:0}
+.item .mid .n{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .mid .s{font-size:11.5px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .amt{font-weight:800;font-variant-numeric:tabular-nums;font-size:14px;text-align:right;flex:0 0 auto}
+.del{border:0;background:transparent;color:#d6d3d1;font-size:17px;cursor:pointer;padding:0 2px;flex:0 0 auto}
+.tag{display:inline-block;font-size:10.5px;font-weight:800;padding:2px 6px;border-radius:5px;
+  background:#f5f5f4;color:var(--sub);margin-right:4px}
+.tag.bad{background:#fef2f2;color:var(--warn)}
+.tag.good{background:#f0fdf4;color:var(--ok)}
+.tag.auto{background:#eff6ff;color:var(--in)}
+
+/* ── nav ── */
+nav.bn{position:fixed;bottom:0;left:0;right:0;z-index:30;background:var(--card);
+  border-top:1px solid var(--line);display:flex;max-width:520px;margin:0 auto;
+  padding-bottom:env(safe-area-inset-bottom)}
+nav.bn button{flex:1;border:0;background:transparent;padding:9px 2px 11px;cursor:pointer;
+  font-size:10.5px;font-weight:700;color:#a8a29e;font-family:inherit;line-height:1.3}
+nav.bn button .i{display:block;font-size:17px;margin-bottom:2px}
+nav.bn button.on{color:var(--personal)}
+body.corp nav.bn button.on{color:var(--corp)}
+.alert{background:#fef2f2;border:1px solid #fecaca;border-radius:11px;padding:11px;margin-bottom:12px}
+.alert .t{font-size:13px;font-weight:800;color:var(--warn);margin-bottom:3px}
+.alert .d{font-size:12.5px;color:#991b1b}
+.hr{height:1px;background:var(--line);margin:12px 0}
+</style>
+</head>
+<body class="personal">
+<div id="app">
+  <div id="installBar">
+    <span>홈 화면에 추가하면 앱처럼 쓸 수 있어요</span>
+    <button onclick="doInstall()">설치</button>
+    <button class="x" onclick="document.getElementById('installBar').classList.remove('show')">×</button>
+  </div>
+  <header>
+    <div class="modeToggle">
+      <button id="mP" class="on" onclick="setMode('personal')">개인</button>
+      <button id="mC" onclick="setMode('corp')">법인</button>
+    </div>
+    <div class="monthNav">
+      <button onclick="moveMonth(-1)">‹</button>
+      <span id="monthLabel"></span>
+      <button onclick="moveMonth(1)">›</button>
+    </div>
+  </header>
+  <main id="view"></main>
+  <nav class="bn" id="nav"></nav>
+</div>
+
+<script>
+/* ═══════════════ 저장소 ═══════════════ */
+const KEY='saeam_ledger_v01';
+let mem=null;
+function load(){
+  try{const r=localStorage.getItem(KEY);if(r)return JSON.parse(r);}catch(e){}
+  return mem||null;
+}
+function save(){
+  mem=S;
+  try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}
+}
+
+/* ═══════════════ 카테고리 정의 ═══════════════ */
+// 부자아빠 현금흐름 기준: 불로소득 = 자산이 만들어내는 수입
+const PASSIVE=['임대료 수입','배당금','이자','로열티'];
+const CAT={
+  personal:{
+    수입:['근로소득','임대료 수입','배당금','이자','로열티','사업소득','기타수입'],
+    지출:['세금','주택 융자금','대출 이자','생활비','식비','교통비','통신비','보험료','의료비','교육비','문화·여가','기타지출'],
+    자산:['부동산','주식','채권','어음','지적 자산','예금·현금','기타자산'],
+    부채:['주택 융자','가계 대출','신용카드','개인 차용','기타부채']
+  },
+  corp:{
+    수입:['부동산 매출','임대수익','용역수익','이자수익','잡이익'],
+    지출:['부동산 매입원가','취득세·등록세','중개수수료','법무사비용','급여','임차료','지급수수료','세금과공과','접대비','광고선전비','이자비용','잡손실','기타비용'],
+    자산:['현금·예금','재고자산(부동산)','유형자산','보증금','가지급금','기타자산'],
+    부채:['차입금','미지급금','예수금','가수금','기타부채']
+  }
+};
+// 법인 손익 분류
+const CORP_REV_OP=['부동산 매출','임대수익','용역수익'];
+const CORP_REV_NONOP=['이자수익','잡이익'];
+const CORP_COGS=['부동산 매입원가','취득세·등록세','중개수수료','법무사비용'];
+const CORP_EXP_NONOP=['이자비용','잡손실'];
+const EVIDENCE=['세금계산서','계산서','현금영수증','사업용카드','간이영수증','증빙없음'];
+const EV_OK=['세금계산서','계산서','현금영수증','사업용카드'];
+
+/* ═══════════════ 세무 일정 ═══════════════ */
+const TAXCAL=[
+  {m:1, d:25, name:'부가가치세 확정신고 (2기)', who:'corp'},
+  {m:2, d:10, name:'원천세 신고·납부', who:'corp'},
+  {m:3, d:31, name:'법인세 신고·납부', who:'corp'},
+  {m:3, d:10, name:'지급명세서 제출', who:'corp'},
+  {m:4, d:25, name:'부가가치세 예정신고 (1기)', who:'corp'},
+  {m:5, d:31, name:'종합소득세 신고 (근로+임대소득)', who:'personal'},
+  {m:5, d:31, name:'해외주식 양도소득세 신고', who:'personal'},
+  {m:7, d:25, name:'부가가치세 확정신고 (1기)', who:'corp'},
+  {m:8, d:31, name:'법인세 중간예납', who:'corp'},
+  {m:10,d:25, name:'부가가치세 예정신고 (2기)', who:'corp'}
+];
+
+/* ═══════════════ 초기 상태 ═══════════════ */
+function blank(){
+  return{
+    personal:{tx:[],assets:[],debts:[],recur:[]},
+    corp:{tx:[],assets:[],debts:[],recur:[],props:[],adv:[]}
+  };
+}
+function sample(){
+  const y=new Date().getFullYear(), m=new Date().getMonth()+1;
+  const d=(day)=>`${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  return{
+    personal:{
+      tx:[
+        {id:u(),date:d(5),kind:'지출',cat:'식비',amt:38000,memo:'장보기',card:true},
+        {id:u(),date:d(9),kind:'지출',cat:'문화·여가',amt:15000,memo:'커피·카페',card:true},
+        {id:u(),date:d(12),kind:'지출',cat:'교통비',amt:52000,memo:'주유',card:true}
+      ],
+      assets:[
+        {id:u(),name:'장위동 세영그린빌 502호',cat:'부동산',val:320000000,memo:'장위13-1구역 조합원'},
+        {id:u(),name:'미국주식 (레버리지 ETF)',cat:'주식',val:3000000,memo:''},
+        {id:u(),name:'수시입출금 예금',cat:'예금·현금',val:8000000,memo:''}
+      ],
+      debts:[
+        {id:u(),name:'삼성생명 주택담보대출',cat:'주택 융자',bal:120000000,rate:4.2,day:15,method:'이자만',pay:0,start:`${y}-01-15`},
+        {id:u(),name:'농협 후순위대출',cat:'주택 융자',bal:50000000,rate:5.8,day:20,method:'이자만',pay:0,start:`${y}-01-20`},
+        {id:u(),name:'둘째매형 개인차용',cat:'개인 차용',bal:30000000,rate:2.0,day:25,method:'이자만',pay:0,start:`${y}-01-25`}
+      ],
+      recur:[
+        {id:u(),kind:'수입',cat:'근로소득',amt:3400000,day:25,memo:'대표이사 급여',on:true},
+        {id:u(),kind:'수입',cat:'임대료 수입',amt:800000,day:1,memo:'새암 법인 임대료',on:true},
+        {id:u(),kind:'지출',cat:'통신비',amt:66000,day:17,memo:'휴대폰·인터넷',on:true},
+        {id:u(),kind:'지출',cat:'보험료',amt:180000,day:5,memo:'보장성보험',on:true}
+      ]
+    },
+    corp:{
+      tx:[
+        {id:u(),date:d(1),kind:'수입',cat:'임대수익',amt:1200000,memo:'쉼자락 공간대여 매출',ev:'현금영수증',evOk:true,prop:'장위동 502호',party:'플랫폼 정산'},
+        {id:u(),date:d(3),kind:'지출',cat:'지급수수료',amt:96000,memo:'플랫폼 수수료',ev:'세금계산서',evOk:true,prop:'장위동 502호',party:'스페이스클라우드'},
+        {id:u(),date:d(8),kind:'지출',cat:'임차료',amt:800000,memo:'대표이사 개인↔법인 임대료',ev:'세금계산서',evOk:false,prop:'장위동 502호',party:'이경철'},
+        {id:u(),date:d(11),kind:'지출',cat:'접대비',amt:74000,memo:'거래처 미팅',ev:'증빙없음',evOk:false,prop:'',party:''}
+      ],
+      assets:[
+        {id:u(),name:'법인 보통예금',cat:'현금·예금',val:12000000,memo:'국민은행'},
+        {id:u(),name:'자본금 납입액',cat:'현금·예금',val:1000000,memo:''}
+      ],
+      debts:[],
+      recur:[
+        {id:u(),kind:'지출',cat:'임차료',amt:800000,day:8,memo:'개인↔법인 임대료',on:true}
+      ],
+      props:[
+        {id:u(),name:'장위동 502호',addr:'서울 성북구 장위동 230-70 세영그린빌 502호',
+         buy:'2026-08-01',cost:0,status:'보유(임차)',memo:'쉼자락 공간대여 운영'}
+      ],
+      adv:[
+        {id:u(),date:d(2),dir:'가수금',amt:2000000,reason:'대표이사 운영자금 대여',back:false}
+      ]
+    }
+  };
+}
+function u(){return Math.random().toString(36).slice(2,10)}
+
+let S=load()||sample();
+let MODE='personal';
+let TAB='dash';
+let CUR=new Date();
+
+/* ═══════════════ 계산 유틸 ═══════════════ */
+const won=n=>(n<0?'-':'')+Math.abs(Math.round(n)).toLocaleString('ko-KR')+'원';
+const wonS=n=>{const a=Math.abs(n);
+  if(a>=100000000)return (n/100000000).toFixed(a%100000000===0?0:1)+'억';
+  if(a>=10000)return Math.round(n/10000).toLocaleString('ko-KR')+'만';
+  return n.toLocaleString('ko-KR');};
+const ym=dt=>`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
+const daysIn=(y,m)=>new Date(y,m,0).getDate();
+
+// 대출 월 이자 / 상환 계산
+function loanMonthly(dbt){
+  const r=(dbt.rate||0)/100/12;
+  if(dbt.method==='원리금균등'&&dbt.pay>0){
+    const int=dbt.bal*r;
+    return{int:int, principal:Math.max(0,dbt.pay-int), total:dbt.pay};
+  }
+  const int=dbt.bal*r;
+  return{int:int, principal:0, total:int};
+}
+
+// 해당 월의 자동 반영 거래 (반복거래 + 대출이자) 생성
+function autoTx(mode,y,m){
+  const D=S[mode], out=[];
+  const dim=daysIn(y,m);
+  (D.recur||[]).forEach(r=>{
+    if(!r.on)return;
+    const day=Math.min(r.day||1,dim);
+    out.push({id:'r_'+r.id,date:`${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`,
+      kind:r.kind,cat:r.cat,amt:r.amt,memo:r.memo,auto:'반복',ev:r.ev||'',evOk:true});
+  });
+  (D.debts||[]).forEach(d=>{
+    if(d.bal<=0)return;
+    const mo=loanMonthly(d);
+    if(mo.total<=0)return;
+    const day=Math.min(d.day||1,dim);
+    out.push({id:'d_'+d.id,date:`${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`,
+      kind:'지출',cat:mode==='corp'?'이자비용':'대출 이자',amt:Math.round(mo.total),
+      memo:`${d.name} (이자 ${won(mo.int)}${mo.principal>0?' + 원금 '+won(mo.principal):''})`,
+      auto:'대출',ev:'',evOk:true});
+  });
+  return out;
+}
+
+function monthTx(mode,y,m){
+  const key=`${y}-${String(m).padStart(2,'0')}`;
+  const manual=(S[mode].tx||[]).filter(t=>t.date.startsWith(key));
+  return [...manual,...autoTx(mode,y,m)].sort((a,b)=>b.date.localeCompare(a.date));
+}
+
+function pnl(mode,y,m){
+  const tx=monthTx(mode,y,m);
+  const inc={},exp={};
+  let inTot=0,outTot=0,passive=0;
+  tx.forEach(t=>{
+    if(t.kind==='수입'){inc[t.cat]=(inc[t.cat]||0)+t.amt;inTot+=t.amt;
+      if(PASSIVE.includes(t.cat))passive+=t.amt;}
+    else if(t.kind==='지출'){exp[t.cat]=(exp[t.cat]||0)+t.amt;outTot+=t.amt;}
+  });
+  return{inc,exp,inTot,outTot,passive,net:inTot-outTot,tx};
+}
+
+function bs(mode){
+  const D=S[mode];
+  const aTot=(D.assets||[]).reduce((s,a)=>s+(a.val||0),0);
+  const dTot=(D.debts||[]).reduce((s,d)=>s+(d.bal||0),0);
+  return{aTot,dTot,net:aTot-dTot,assets:D.assets||[],debts:D.debts||[]};
+}
+
+function corpPnl(y,m){
+  const p=pnl('corp',y,m);
+  let revOp=0,revNon=0,cogs=0,sga=0,expNon=0;
+  Object.entries(p.inc).forEach(([c,v])=>{CORP_REV_NONOP.includes(c)?revNon+=v:revOp+=v;});
+  Object.entries(p.exp).forEach(([c,v])=>{
+    if(CORP_COGS.includes(c))cogs+=v;
+    else if(CORP_EXP_NONOP.includes(c))expNon+=v;
+    else sga+=v;});
+  const gross=revOp-cogs, op=gross-sga, net=op+revNon-expNon;
+  return{...p,revOp,revNon,cogs,sga,expNon,gross,op,net};
+}
+
+function advBalance(){
+  let 가지급금=0,가수금=0;
+  (S.corp.adv||[]).forEach(a=>{
+    if(a.back)return;
+    if(a.dir==='가지급금')가지급금+=a.amt; else 가수금+=a.amt;
+  });
+  return{가지급금,가수금};
+}
+
+/* ═══════════════ 렌더 ═══════════════ */
+function setMode(m){MODE=m;TAB='dash';
+  document.body.className=m==='corp'?'corp':'personal';
+  document.getElementById('mP').className=m==='personal'?'on':'';
+  document.getElementById('mC').className=m==='corp'?'on':'';
+  render();}
+function moveMonth(d){CUR=new Date(CUR.getFullYear(),CUR.getMonth()+d,1);render();}
+function go(t){TAB=t;render();window.scrollTo(0,0);}
+
+function render(){
+  const y=CUR.getFullYear(),m=CUR.getMonth()+1;
+  document.getElementById('monthLabel').textContent=`${y}.${String(m).padStart(2,'0')}`;
+  const tabs=MODE==='personal'
+    ?[['dash','📊','대시보드'],['add','✏️','입력'],['list','📋','내역'],['bs','🏦','자산·부채'],['recur','🔁','반복·대출']]
+    :[['dash','📊','대시보드'],['add','✏️','입력'],['list','📋','내역'],['bs','🏦','자산·부채'],['tax','🧾','증빙·세무']];
+  document.getElementById('nav').innerHTML=tabs.map(([k,i,n])=>
+    `<button class="${TAB===k?'on':''}" onclick="go('${k}')"><span class="i">${i}</span>${n}</button>`).join('');
+  const V=document.getElementById('view');
+  const fn={dash:vDash,add:vAdd,list:vList,bs:vBS,recur:vRecur,tax:vTax}[TAB]||vDash;
+  V.innerHTML=fn(y,m);
+}
+
+/* ── 대시보드 ── */
+function vDash(y,m){
+  return MODE==='personal'?dashPersonal(y,m):dashCorp(y,m);
+}
+
+function dashPersonal(y,m){
+  const P=pnl('personal',y,m), B=bs('personal');
+  const freedom=P.outTot>0?Math.min(100,Math.round(P.passive/P.outTot*100)):0;
+  const incItems=Object.entries(P.inc).sort((a,b)=>b[1]-a[1]);
+  const expItems=Object.entries(P.exp).sort((a,b)=>b[1]-a[1]);
+  const assetByCat=groupBy(B.assets,'cat','val');
+  const debtByCat=groupBy(B.debts,'cat','bal');
+
+  return `
+  <div class="cf">
+    <div class="cfTitle">현금흐름 (부자아빠 패턴)</div>
+    <div class="cfBox">
+      <div class="cfHead">손익계산서</div>
+      <div class="cfHalf">
+        <div class="t in">수입 ${won(P.inTot)}</div>
+        ${incItems.length?incItems.map(([c,v])=>`<div class="cfItem"><span>${c}${PASSIVE.includes(c)?' ●':''}</span><b>${wonS(v)}</b></div>`).join(''):'<div class="cfItem"><span>기록 없음</span></div>'}
+      </div>
+      <div class="cfHalf">
+        <div class="t out">지출 ${won(P.outTot)}</div>
+        ${expItems.length?expItems.slice(0,6).map(([c,v])=>`<div class="cfItem"><span>${c}</span><b>${wonS(v)}</b></div>`).join(''):'<div class="cfItem"><span>기록 없음</span></div>'}
+      </div>
+    </div>
+    <div class="cfArrow"><span class="a in">↑</span>자산이 수입을 만든다&nbsp;&nbsp;|&nbsp;&nbsp;부채가 지출을 만든다<span class="a out">↑</span></div>
+    <div class="cfBox">
+      <div class="cfHead">대차대조표</div>
+      <div class="cfHalf">
+        <div class="t asset">자산 ${won(B.aTot)}</div>
+        ${assetByCat.length?assetByCat.map(([c,v])=>`<div class="cfItem"><span>${c}</span><b>${wonS(v)}</b></div>`).join(''):'<div class="cfItem"><span>기록 없음</span></div>'}
+      </div>
+      <div class="cfHalf">
+        <div class="t debt">부채 ${won(B.dTot)}</div>
+        ${debtByCat.length?debtByCat.map(([c,v])=>`<div class="cfItem"><span>${c}</span><b>${wonS(v)}</b></div>`).join(''):'<div class="cfItem"><span>기록 없음</span></div>'}
+      </div>
+    </div>
+    <div class="freedom">
+      <div class="fTop"><span><b>경제적 자유도</b> · 불로소득 ÷ 총지출</span><b>${freedom}%</b></div>
+      <div class="bar"><i style="width:${freedom}%"></i></div>
+      <div class="muted" style="margin-top:6px">불로소득 ${won(P.passive)} / 총지출 ${won(P.outTot)} — 100%가 되면 일하지 않아도 지출이 충당됩니다</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>이번 달 요약</h3>
+    <div class="row"><span class="lbl">총수입</span><span class="val in">${won(P.inTot)}</span></div>
+    <div class="row"><span class="lbl">총지출</span><span class="val out">${won(P.outTot)}</span></div>
+    <div class="row total"><span class="lbl">순현금흐름</span><span class="val ${P.net>=0?'in':'out'}">${won(P.net)}</span></div>
+  </div>
+
+  <div class="card">
+    <h3>순자산</h3>
+    <div class="row"><span class="lbl">총자산</span><span class="val asset">${won(B.aTot)}</span></div>
+    <div class="row"><span class="lbl">총부채</span><span class="val debt">${won(B.dTot)}</span></div>
+    <div class="row total"><span class="lbl">순자산</span><span class="val">${won(B.net)}</span></div>
+  </div>
+  ${taxAlert(y,m,'personal')}`;
+}
+
+function dashCorp(y,m){
+  const C=corpPnl(y,m), B=bs('corp'), A=advBalance();
+  const noEv=(S.corp.tx||[]).filter(t=>t.date.startsWith(`${y}-${String(m).padStart(2,'0')}`)&&t.kind==='지출'&&!t.evOk);
+  return `
+  ${noEv.length?`<div class="alert"><div class="t">⚠️ 적격증빙 미비 ${noEv.length}건</div>
+    <div class="d">${noEv.map(t=>`${t.cat} ${won(t.amt)}`).join(' · ')}<br>증빙이 없으면 비용 인정을 못 받고 가산세 대상이 됩니다.</div></div>`:''}
+
+  <div class="card">
+    <h3>손익계산서 · ${y}.${String(m).padStart(2,'0')}</h3>
+    <div class="row"><span class="lbl">매출액</span><span class="val in">${won(C.revOp)}</span></div>
+    <div class="row"><span class="lbl">(−) 매출원가</span><span class="val out">${won(C.cogs)}</span></div>
+    <div class="row total"><span class="lbl">매출총이익</span><span class="val">${won(C.gross)}</span></div>
+    <div class="row"><span class="lbl">(−) 판매관리비</span><span class="val out">${won(C.sga)}</span></div>
+    <div class="row total"><span class="lbl">영업이익</span><span class="val ${C.op>=0?'in':'out'}">${won(C.op)}</span></div>
+    <div class="row"><span class="lbl">(+) 영업외수익</span><span class="val in">${won(C.revNon)}</span></div>
+    <div class="row"><span class="lbl">(−) 영업외비용</span><span class="val out">${won(C.expNon)}</span></div>
+    <div class="row total"><span class="lbl">당기순이익</span><span class="val ${C.net>=0?'in':'out'}">${won(C.net)}</span></div>
+  </div>
+
+  <div class="card">
+    <h3>대차대조표</h3>
+    <div class="row"><span class="lbl">자산 총계</span><span class="val asset">${won(B.aTot)}</span></div>
+    <div class="row"><span class="lbl">부채 총계</span><span class="val debt">${won(B.dTot)}</span></div>
+    <div class="row total"><span class="lbl">자본 총계</span><span class="val">${won(B.net)}</span></div>
+  </div>
+
+  <div class="card">
+    <h3>가지급금 · 가수금 잔액</h3>
+    <div class="row"><span class="lbl">가지급금 <span class="muted">(법인→대표)</span></span>
+      <span class="val ${A.가지급금>0?'out':''}">${won(A.가지급금)}</span></div>
+    <div class="row"><span class="lbl">가수금 <span class="muted">(대표→법인)</span></span>
+      <span class="val">${won(A.가수금)}</span></div>
+    ${A.가지급금>0?`<div class="muted" style="margin-top:8px;color:var(--warn)">가지급금은 인정이자가 과세됩니다. 상환 계획을 세우세요.</div>`:''}
+  </div>
+
+  ${(S.corp.props||[]).length?`<div class="card"><h3>물건별 현황</h3>
+    ${S.corp.props.map(p=>{
+      const t=(S.corp.tx||[]).filter(x=>x.prop===p.name);
+      const i=t.filter(x=>x.kind==='수입').reduce((s,x)=>s+x.amt,0);
+      const o=t.filter(x=>x.kind==='지출').reduce((s,x)=>s+x.amt,0);
+      return `<div class="item"><div class="ic" style="background:var(--corp)">物</div>
+        <div class="mid"><div class="n">${p.name}</div><div class="s">${p.status} · ${p.addr||''}</div></div>
+        <div class="amt ${i-o>=0?'in':'out'}">${wonS(i-o)}</div></div>`;}).join('')}
+  </div>`:''}
+  ${taxAlert(y,m,'corp')}`;
+}
+
+function taxAlert(y,m,who){
+  const items=TAXCAL.filter(t=>t.who===who);
+  const cur=items.filter(t=>t.m===m);
+  const next=items.filter(t=>t.m===(m%12)+1);
+  if(!cur.length&&!next.length)return '';
+  return `<div class="card"><h3>세무 신고 일정</h3>
+    ${cur.map(t=>`<div class="row"><span class="lbl" style="color:var(--warn);font-weight:800">🔴 이번 달 · ${m}/${t.d}</span>
+      <span class="val" style="color:var(--warn);font-size:13px">${t.name}</span></div>`).join('')}
+    ${next.map(t=>`<div class="row"><span class="lbl">다음 달 · ${t.m}/${t.d}</span>
+      <span class="val" style="font-weight:600;font-size:13px;color:var(--sub)">${t.name}</span></div>`).join('')}
+  </div>`;
+}
+
+function groupBy(arr,catKey,valKey){
+  const g={};arr.forEach(a=>{g[a[catKey]]=(g[a[catKey]]||0)+(a[valKey]||0)});
+  return Object.entries(g).sort((a,b)=>b[1]-a[1]);
+}
+
+/* ── 입력 ── */
+let addKind='지출';
+function setKind(k){addKind=k;render();}
+function vAdd(y,m){
+  const cats=CAT[MODE][addKind]||[];
+  const today=new Date();
+  const dv=`${y}-${String(m).padStart(2,'0')}-${String(Math.min(today.getDate(),daysIn(y,m))).padStart(2,'0')}`;
+  return `<div class="card">
+    <h3>거래 입력</h3>
+    <label>구분</label>
+    <div class="segRow">
+      ${['수입','지출'].map(k=>`<button class="${addKind===k?'on':''}" onclick="setKind('${k}')">${k}</button>`).join('')}
+    </div>
+    <label>날짜 <span class="muted">(카드는 결제일이 아닌 사용일로 적으세요)</span></label>
+    <input type="date" id="f_date" value="${dv}">
+    <label>금액</label>
+    <input type="number" id="f_amt" inputmode="numeric" placeholder="0">
+    <label>분류</label>
+    <select id="f_cat">${cats.map(c=>`<option>${c}</option>`).join('')}</select>
+    <label>메모 · 적요</label>
+    <input type="text" id="f_memo" placeholder="${MODE==='corp'?'예: 매입_장위동502호_잔금':'예: 장보기'}">
+    ${MODE==='corp'?`
+      <label>적격증빙</label>
+      <select id="f_ev">${EVIDENCE.map(e=>`<option>${e}</option>`).join('')}</select>
+      <div class="grid2">
+        <div><label>거래처</label><input type="text" id="f_party" placeholder="상호"></div>
+        <div><label>관련 물건</label>
+          <select id="f_prop"><option value=""></option>${(S.corp.props||[]).map(p=>`<option>${p.name}</option>`).join('')}</select>
+        </div>
+      </div>`:''}
+    <button class="btn" onclick="addTx()">저장</button>
+  </div>`;
+}
+function addTx(){
+  const amt=+document.getElementById('f_amt').value;
+  if(!amt){alert('금액을 입력하세요');return;}
+  const t={id:u(),date:document.getElementById('f_date').value,kind:addKind,
+    cat:document.getElementById('f_cat').value,amt:amt,
+    memo:document.getElementById('f_memo').value};
+  if(MODE==='corp'){
+    t.ev=document.getElementById('f_ev').value;
+    t.evOk=EV_OK.includes(t.ev);
+    t.party=document.getElementById('f_party').value;
+    t.prop=document.getElementById('f_prop').value;
+  }
+  S[MODE].tx.push(t);save();TAB='list';render();
+}
+
+/* ── 내역 ── */
+function vList(y,m){
+  const tx=monthTx(MODE,y,m);
+  if(!tx.length)return `<div class="card"><div class="empty">이번 달 내역이 없습니다</div></div>`;
+  const byDay={};
+  tx.forEach(t=>{(byDay[t.date]=byDay[t.date]||[]).push(t)});
+  return Object.keys(byDay).sort().reverse().map(d=>{
+    const day=byDay[d];
+    const sum=day.reduce((s,t)=>s+(t.kind==='수입'?t.amt:-t.amt),0);
+    return `<div class="card">
+      <h3>${d.slice(5).replace('-','월 ')}일 <span style="float:right;color:${sum>=0?'var(--in)':'var(--out)'}">${won(sum)}</span></h3>
+      ${day.map(t=>{
+        const c=t.kind==='수입'?'var(--in)':'var(--out)';
+        return `<div class="item">
+          <div class="ic" style="background:${c}">${t.kind==='수입'?'수':'지'}</div>
+          <div class="mid"><div class="n">${t.cat}
+            ${t.auto?`<span class="tag auto">${t.auto}</span>`:''}
+            ${MODE==='corp'&&t.ev?`<span class="tag ${t.evOk?'good':'bad'}">${t.ev}</span>`:''}</div>
+            <div class="s">${t.memo||''}${t.party?' · '+t.party:''}${t.prop?' · '+t.prop:''}</div></div>
+          <div class="amt" style="color:${c}">${t.kind==='수입'?'+':'−'}${won(t.amt).replace('원','')}</div>
+          ${t.auto?'':`<button class="del" onclick="delTx('${t.id}')">×</button>`}
+        </div>`;}).join('')}
+    </div>`;}).join('');
+}
+function delTx(id){S[MODE].tx=S[MODE].tx.filter(t=>t.id!==id);save();render();}
+
+/* ── 자산·부채 ── */
+function vBS(){
+  const B=bs(MODE);
+  return `
+  <div class="card">
+    <h3>자산 <span style="float:right" class="asset">${won(B.aTot)}</span></h3>
+    ${B.assets.length?B.assets.map(a=>`<div class="item">
+      <div class="ic" style="background:var(--asset)">資</div>
+      <div class="mid"><div class="n">${a.name}</div><div class="s">${a.cat}${a.memo?' · '+a.memo:''}</div></div>
+      <div class="amt asset">${wonS(a.val)}</div>
+      <button class="del" onclick="delItem('assets','${a.id}')">×</button></div>`).join('')
+      :'<div class="empty">등록된 자산이 없습니다</div>'}
+    <div class="hr"></div>
+    <label>자산명</label><input type="text" id="a_name" placeholder="예: 장위동 502호">
+    <div class="grid2">
+      <div><label>분류</label><select id="a_cat">${CAT[MODE].자산.map(c=>`<option>${c}</option>`).join('')}</select></div>
+      <div><label>평가액</label><input type="number" id="a_val" inputmode="numeric" placeholder="0"></div>
+    </div>
+    <button class="btn sub" onclick="addAsset()">＋ 자산 추가</button>
+  </div>
+
+  <div class="card">
+    <h3>부채 <span style="float:right" class="debt">${won(B.dTot)}</span></h3>
+    ${B.debts.length?B.debts.map(d=>{
+      const mo=loanMonthly(d);
+      return `<div class="item">
+      <div class="ic" style="background:var(--debt)">負</div>
+      <div class="mid"><div class="n">${d.name}</div>
+        <div class="s">${d.cat} · 연 ${d.rate}% · 매월 ${d.day}일 · 월 ${won(mo.total)}</div></div>
+      <div class="amt debt">${wonS(d.bal)}</div>
+      <button class="del" onclick="delItem('debts','${d.id}')">×</button></div>`;}).join('')
+      :'<div class="empty">등록된 부채가 없습니다</div>'}
+    <div class="hr"></div>
+    <label>부채명 <span class="muted">(대출처)</span></label>
+    <input type="text" id="d_name" placeholder="예: 삼성생명 주택담보대출">
+    <div class="grid2">
+      <div><label>분류</label><select id="d_cat">${CAT[MODE].부채.map(c=>`<option>${c}</option>`).join('')}</select></div>
+      <div><label>잔액</label><input type="number" id="d_bal" inputmode="numeric" placeholder="0"></div>
+    </div>
+    <div class="grid2">
+      <div><label>연이율 %</label><input type="number" id="d_rate" step="0.01" placeholder="4.2"></div>
+      <div><label>매월 납입일</label><input type="number" id="d_day" min="1" max="31" placeholder="15"></div>
+    </div>
+    <div class="grid2">
+      <div><label>상환방식</label><select id="d_method"><option>이자만</option><option>원리금균등</option></select></div>
+      <div><label>월 납입액 <span class="muted">(원리금균등만)</span></label><input type="number" id="d_pay" placeholder="0"></div>
+    </div>
+    <button class="btn sub" onclick="addDebt()">＋ 부채 추가</button>
+    <div class="muted" style="margin-top:8px">한 번 등록하면 매월 이자가 자동으로 지출에 반영되고, 원금 상환분만큼 잔액이 줄어듭니다.</div>
+  </div>
+
+  <div class="card">
+    <h3>데이터 관리</h3>
+    <button class="btn sub" onclick="exportJSON()">📥 백업 파일 내려받기</button>
+    <button class="btn sub" onclick="document.getElementById('imp').click()">📤 백업 파일 불러오기</button>
+    <input type="file" id="imp" accept=".json" style="display:none" onchange="importJSON(event)">
+    <button class="btn sub danger" onclick="resetAll()">전체 초기화</button>
+  </div>`;
+}
+function addAsset(){
+  const n=document.getElementById('a_name').value, v=+document.getElementById('a_val').value;
+  if(!n){alert('자산명을 입력하세요');return;}
+  S[MODE].assets.push({id:u(),name:n,cat:document.getElementById('a_cat').value,val:v,memo:''});
+  save();render();
+}
+function addDebt(){
+  const n=document.getElementById('d_name').value;
+  if(!n){alert('부채명을 입력하세요');return;}
+  S[MODE].debts.push({id:u(),name:n,cat:document.getElementById('d_cat').value,
+    bal:+document.getElementById('d_bal').value,rate:+document.getElementById('d_rate').value||0,
+    day:+document.getElementById('d_day').value||1,method:document.getElementById('d_method').value,
+    pay:+document.getElementById('d_pay').value||0,start:new Date().toISOString().slice(0,10)});
+  save();render();
+}
+function delItem(k,id){S[MODE][k]=S[MODE][k].filter(x=>x.id!==id);save();render();}
+
+/* ── 반복·대출 (개인) ── */
+function vRecur(){
+  const R=S[MODE].recur||[];
+  return `<div class="card">
+    <h3>매월 반복되는 수입·지출</h3>
+    ${R.length?R.map(r=>`<div class="item">
+      <div class="ic" style="background:${r.kind==='수입'?'var(--in)':'var(--out)'}">${r.kind==='수입'?'수':'지'}</div>
+      <div class="mid"><div class="n">${r.cat} ${r.on?'':'<span class="tag">중지</span>'}</div>
+        <div class="s">매월 ${r.day}일 · ${r.memo||''}</div></div>
+      <div class="amt ${r.kind==='수입'?'in':'out'}">${wonS(r.amt)}</div>
+      <button class="del" onclick="toggleRecur('${r.id}')">${r.on?'⏸':'▶'}</button>
+      <button class="del" onclick="delItem('recur','${r.id}')">×</button></div>`).join('')
+      :'<div class="empty">등록된 반복 거래가 없습니다</div>'}
+    <div class="hr"></div>
+    <label>구분</label>
+    <div class="segRow">
+      <button class="${addKind==='수입'?'on':''}" onclick="setKind('수입')">수입</button>
+      <button class="${addKind==='지출'?'on':''}" onclick="setKind('지출')">지출</button>
+    </div>
+    <div class="grid2">
+      <div><label>분류</label><select id="r_cat">${CAT[MODE][addKind].map(c=>`<option>${c}</option>`).join('')}</select></div>
+      <div><label>금액</label><input type="number" id="r_amt" inputmode="numeric" placeholder="0"></div>
+    </div>
+    <div class="grid2">
+      <div><label>매월 며칠</label><input type="number" id="r_day" min="1" max="31" placeholder="25"></div>
+      <div><label>메모</label><input type="text" id="r_memo" placeholder="예: 대표이사 급여"></div>
+    </div>
+    <button class="btn sub" onclick="addRecur()">＋ 반복 거래 추가</button>
+    <div class="muted" style="margin-top:8px">한 번 등록하면 매월 자동으로 내역에 잡히고, 손익계산서에 반영됩니다.</div>
+  </div>
+
+  <div class="card">
+    <h3>대출 상환 스케줄</h3>
+    ${(S[MODE].debts||[]).length?S[MODE].debts.map(d=>{
+      const mo=loanMonthly(d);
+      const months=mo.principal>0?Math.ceil(d.bal/mo.principal):null;
+      return `<div class="item"><div class="ic" style="background:var(--debt)">貸</div>
+        <div class="mid"><div class="n">${d.name}</div>
+          <div class="s">잔액 ${wonS(d.bal)} · 연 ${d.rate}% · 매월 ${d.day}일<br>
+          월 이자 ${won(mo.int)}${mo.principal>0?` + 원금 ${won(mo.principal)}`:''}
+          ${months?` · 약 ${months}개월 후 완제`:' · 만기일시상환'}</div></div>
+      </div>`;}).join(''):'<div class="empty">등록된 대출이 없습니다. 자산·부채 탭에서 추가하세요.</div>'}
+  </div>`;
+}
+function toggleRecur(id){const r=S[MODE].recur.find(x=>x.id===id);if(r){r.on=!r.on;save();render();}}
+function addRecur(){
+  const a=+document.getElementById('r_amt').value;
+  if(!a){alert('금액을 입력하세요');return;}
+  S[MODE].recur.push({id:u(),kind:addKind,cat:document.getElementById('r_cat').value,amt:a,
+    day:+document.getElementById('r_day').value||1,memo:document.getElementById('r_memo').value,on:true});
+  save();render();
+}
+
+/* ── 증빙·세무 (법인) ── */
+function vTax(y,m){
+  const key=`${y}-${String(m).padStart(2,'0')}`;
+  const tx=(S.corp.tx||[]).filter(t=>t.date.startsWith(key));
+  const bad=tx.filter(t=>t.kind==='지출'&&!t.evOk);
+  const evStat={};
+  tx.forEach(t=>{if(t.ev)evStat[t.ev]=(evStat[t.ev]||0)+1;});
+  const A=advBalance();
+  const vatOut=tx.filter(t=>t.kind==='수입').reduce((s,t)=>s+t.amt,0);
+  const vatIn=tx.filter(t=>t.kind==='지출'&&['세금계산서','현금영수증','사업용카드'].includes(t.ev)).reduce((s,t)=>s+t.amt,0);
+
+  return `
+  ${bad.length?`<div class="alert"><div class="t">⚠️ 적격증빙 미비 ${bad.length}건 · ${won(bad.reduce((s,t)=>s+t.amt,0))}</div>
+    <div class="d">아래 건은 비용 인정이 어렵거나 증빙불비 가산세(2%) 대상입니다.</div></div>`:
+    `<div class="card"><div class="row"><span class="lbl">적격증빙 상태</span>
+     <span class="val" style="color:var(--ok)">✓ 이번 달 미비 건 없음</span></div></div>`}
+
+  ${bad.length?`<div class="card"><h3>증빙 보완 필요</h3>
+    ${bad.map(t=>`<div class="item"><div class="ic" style="background:var(--warn)">!</div>
+      <div class="mid"><div class="n">${t.cat} <span class="tag bad">${t.ev}</span></div>
+        <div class="s">${t.date} · ${t.memo||''}${t.party?' · '+t.party:''}</div></div>
+      <div class="amt out">${wonS(t.amt)}</div></div>`).join('')}
+  </div>`:''}
+
+  <div class="card">
+    <h3>부가세 예상 (참고용)</h3>
+    <div class="row"><span class="lbl">매출 합계</span><span class="val in">${won(vatOut)}</span></div>
+    <div class="row"><span class="lbl">공제 가능 매입</span><span class="val out">${won(vatIn)}</span></div>
+    <div class="row total"><span class="lbl">예상 납부세액 <span class="muted">(1/11 기준)</span></span>
+      <span class="val">${won(Math.max(0,(vatOut-vatIn)/11))}</span></div>
+    <div class="muted" style="margin-top:8px">실제 세액은 세무사 검토가 필요합니다. 여기 숫자는 감을 잡기 위한 참고값입니다.</div>
+  </div>
+
+  <div class="card">
+    <h3>증빙 유형별 건수</h3>
+    ${Object.keys(evStat).length?Object.entries(evStat).map(([e,c])=>
+      `<div class="row"><span class="lbl">${e}</span>
+       <span class="val ${EV_OK.includes(e)?'':'out'}">${c}건</span></div>`).join('')
+      :'<div class="empty">이번 달 거래가 없습니다</div>'}
+  </div>
+
+  <div class="card">
+    <h3>가지급금 · 가수금 대장</h3>
+    ${(S.corp.adv||[]).length?S.corp.adv.map(a=>`<div class="item">
+      <div class="ic" style="background:${a.dir==='가지급금'?'var(--warn)':'var(--in)'}">${a.dir==='가지급금'?'給':'受'}</div>
+      <div class="mid"><div class="n">${a.dir} ${a.back?'<span class="tag good">상환완료</span>':''}</div>
+        <div class="s">${a.date} · ${a.reason}</div></div>
+      <div class="amt ${a.dir==='가지급금'?'out':'in'}">${wonS(a.amt)}</div>
+      <button class="del" onclick="toggleAdv('${a.id}')">✓</button>
+      <button class="del" onclick="delAdv('${a.id}')">×</button></div>`).join('')
+      :'<div class="empty">기록이 없습니다</div>'}
+    <div class="hr"></div>
+    <div class="grid2">
+      <div><label>구분</label><select id="v_dir"><option>가수금</option><option>가지급금</option></select></div>
+      <div><label>금액</label><input type="number" id="v_amt" inputmode="numeric" placeholder="0"></div>
+    </div>
+    <label>사유 <span class="muted">(반드시 구체적으로)</span></label>
+    <input type="text" id="v_reason" placeholder="예: 대표이사 운영자금 대여">
+    <button class="btn sub" onclick="addAdv()">＋ 기록 추가</button>
+    <div class="muted" style="margin-top:8px">가지급금은 인정이자가 과세되고 세무조사의 주요 지적사항입니다. 발생 즉시 사유와 상환계획을 남기세요.</div>
+  </div>
+
+  <div class="card">
+    <h3>물건 관리</h3>
+    ${(S.corp.props||[]).map(p=>`<div class="item"><div class="ic" style="background:var(--corp)">物</div>
+      <div class="mid"><div class="n">${p.name}</div><div class="s">${p.addr}<br>${p.status} · ${p.memo||''}</div></div>
+      <button class="del" onclick="delItem('props','${p.id}')">×</button></div>`).join('')||'<div class="empty">등록된 물건이 없습니다</div>'}
+    <div class="hr"></div>
+    <label>물건명</label><input type="text" id="p_name" placeholder="예: 장위동 502호">
+    <label>주소</label><input type="text" id="p_addr" placeholder="전체 주소">
+    <div class="grid2">
+      <div><label>상태</label><select id="p_status"><option>검토중</option><option>계약</option><option>보유(임대)</option><option>보유(임차)</option><option>매도완료</option></select></div>
+      <div><label>취득가</label><input type="number" id="p_cost" placeholder="0"></div>
+    </div>
+    <button class="btn sub" onclick="addProp()">＋ 물건 추가</button>
+    <div class="muted" style="margin-top:8px">경매·공매 취득 시 법원 납부영수증, 매각허가결정문, 배당표까지 보관해야 취득가액이 인정됩니다.</div>
+  </div>
+
+  <div class="card">
+    <h3>연간 세무 일정</h3>
+    ${TAXCAL.map(t=>`<div class="row">
+      <span class="lbl" style="${t.m===m?'color:var(--warn);font-weight:800':''}">${t.m===m?'🔴 ':''}${t.m}월 ${t.d}일</span>
+      <span class="val" style="font-size:12.5px;font-weight:600;${t.m===m?'color:var(--warn)':'color:var(--sub)'}">${t.name}</span></div>`).join('')}
+  </div>`;
+}
+function addAdv(){
+  const a=+document.getElementById('v_amt').value;
+  if(!a){alert('금액을 입력하세요');return;}
+  S.corp.adv.push({id:u(),date:new Date().toISOString().slice(0,10),
+    dir:document.getElementById('v_dir').value,amt:a,
+    reason:document.getElementById('v_reason').value||'(사유 미기재)',back:false});
+  save();render();
+}
+function toggleAdv(id){const a=S.corp.adv.find(x=>x.id===id);if(a){a.back=!a.back;save();render();}}
+function delAdv(id){S.corp.adv=S.corp.adv.filter(x=>x.id!==id);save();render();}
+function addProp(){
+  const n=document.getElementById('p_name').value;
+  if(!n){alert('물건명을 입력하세요');return;}
+  S.corp.props.push({id:u(),name:n,addr:document.getElementById('p_addr').value,
+    status:document.getElementById('p_status').value,cost:+document.getElementById('p_cost').value||0,
+    buy:new Date().toISOString().slice(0,10),memo:''});
+  save();render();
+}
+
+/* ── 백업 ── */
+function exportJSON(){
+  const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(b);
+  a.download=`가계부백업_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+}
+function importJSON(e){
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{try{S=JSON.parse(r.result);save();render();alert('불러왔습니다');}
+    catch(err){alert('파일을 읽을 수 없습니다');}};
+  r.readAsText(f);
+}
+function resetAll(){
+  if(!confirm('모든 데이터가 삭제됩니다. 계속할까요?'))return;
+  S=blank();save();render();
+}
+
+render();
+
+/* ═══════════════ PWA 설치 · 오프라인 ═══════════════ */
+let deferredPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{
+  e.preventDefault();
+  deferredPrompt=e;
+  document.getElementById('installBar').classList.add('show');
+});
+function doInstall(){
+  if(!deferredPrompt){
+    alert('브라우저 메뉴(⋮)에서 "홈 화면에 추가"를 선택하세요.');
+    return;
+  }
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.then(()=>{
+    deferredPrompt=null;
+    document.getElementById('installBar').classList.remove('show');
+  });
+}
+window.addEventListener('appinstalled',()=>{
+  document.getElementById('installBar').classList.remove('show');
+});
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>
