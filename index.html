@@ -180,6 +180,13 @@ body.corp nav.bn button.on{color:var(--corp)}
 .gEvt{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
 .gEvtT{font-size:12px;font-weight:800;color:var(--sub);margin-bottom:7px}
 .gNothing{font-size:11.5px;color:var(--sub);margin-top:7px;line-height:1.5}
+/* 대출 상환 */
+.repayBox{background:#fafaf9;border:1px solid var(--line);border-radius:10px;
+  padding:10px 12px;margin:8px 0 4px}
+.repayNote{font-size:11.5px;color:var(--sub);line-height:1.55;margin-top:8px;
+  background:#fffbeb;border-radius:7px;padding:7px 9px}
+.repayList{margin-top:8px;padding-top:6px;border-top:1px dashed var(--line)}
+.tag.bs{background:var(--asset)}
 </style>
 </head>
 <body class="personal">
@@ -586,47 +593,67 @@ function loanInfo(d){
   }else if(d.method==='원금균등'&&n>0){
     monthly = P/n + P*r;            // 첫 회차 기준(이후 감소)
   }else{
-    monthly = P*r;                   // 만기일시 = 매월 이자만
+    monthly = P*r;                   // 만기일시 / 확정이자 = 매월 이자만
   }
   return {P,r,n,monthly};
 }
+
+/* ── 중도상환 ──
+   d.repays = [{id, date:'YYYY-MM-DD', amt}]
+   해당 연월 말까지 갚은 누적 원금을 돌려준다 */
+function loanRepaid(d,y,m){
+  if(!(d.repays||[]).length) return 0;
+  const cut = (y&&m) ? `${y}-${String(m).padStart(2,'0')}-31` : '9999-12-31';
+  return d.repays.filter(x=>x.date<=cut).reduce((s,x)=>s+(+x.amt||0),0);
+}
+function loanRepaidAll(d){ return loanRepaid(d); }
 // 특정 연월의 상환 상태 (k회차 기준)
 function loanAt(d,y,m){
   const {P,r,n} = loanInfo(d);
-  if(!d.start)return{k:0,balance:d.bal||0,interest:(d.bal||0)*r,principal:0,payment:(d.bal||0)*r,done:false,before:false};
+  const paid = loanRepaid(d,y,m);          // 이 달까지 중도상환한 누적 원금
+  const prev = loanRepaid(d, m===1?y-1:y, m===1?12:m-1);  // 지난달까지
+  const thisMonthRepay = paid - prev;      // 이번 달에 갚은 금액
+  if(!d.start)return{k:0,balance:Math.max(0,(d.bal||0)-paid),interest:(d.bal||0)*r,
+    principal:0,payment:(d.bal||0)*r,paid,thisMonthRepay,done:false,before:false};
   const s=new Date(d.start);
   const k=(y-s.getFullYear())*12+(m-1-s.getMonth())+1;   // 1회차부터
-  if(k<1)return{k:0,balance:P,interest:0,principal:0,payment:0,done:false,before:true};
-  if(n>0&&k>n)return{k,balance:0,interest:0,principal:0,payment:0,done:true,before:false};
+  if(k<1)return{k:0,balance:P,interest:0,principal:0,payment:0,paid:0,thisMonthRepay:0,done:false,before:true};
+  if(n>0&&k>n)return{k,balance:0,interest:0,principal:0,payment:0,paid,thisMonthRepay:0,done:true,before:false};
 
   let balance,interest,principal,payment;
-  if(d.method==='원리금균등'&&n>0){
+  if(d.method==='확정이자'){
+    // 원금을 갚아도 이자는 최초 원금 기준으로 고정
+    balance=Math.max(0,P-paid);
+    interest=P*r;
+    principal=0;
+    payment=interest;
+  }else if(d.method==='원리금균등'&&n>0){
     const {monthly}=loanInfo(d);
     balance = r===0 ? P-(P/n)*(k-1)
       : P*Math.pow(1+r,k-1) - monthly*(Math.pow(1+r,k-1)-1)/r;
-    balance=Math.max(0,balance);
+    balance=Math.max(0,balance-paid);
     interest=balance*r;
     principal=Math.min(balance,monthly-interest);
-    payment=monthly;
+    payment=principal+interest;
   }else if(d.method==='원금균등'&&n>0){
     const pp=P/n;
-    balance=Math.max(0,P-pp*(k-1));
+    balance=Math.max(0,P-pp*(k-1)-paid);
     interest=balance*r;
     principal=Math.min(balance,pp);
     payment=principal+interest;
   }else{
-    balance=P;
-    interest=P*r;
-    principal=(n>0&&k===n)?P:0;
+    balance=Math.max(0,P-paid);
+    interest=balance*r;
+    principal=(n>0&&k===n)?balance:0;
     payment=interest+principal;
   }
-  return{k,balance,interest,principal,payment,done:false,before:false};
+  return{k,balance,interest,principal,payment,paid,thisMonthRepay,done:balance<=0&&paid>0,before:false};
 }
 // 현재 잔액 (오늘 기준)
 function loanBalanceNow(d){
   const t=new Date();
   const st=loanAt(d,t.getFullYear(),t.getMonth()+1);
-  return st.done?0:Math.round(st.balance);
+  return Math.max(0,Math.round(st.balance));
 }
 // 완제 예정일
 function loanEndLabel(d){
@@ -655,11 +682,12 @@ function autoTx(mode,y,m){
   });
   (D.debts||[]).forEach(d=>{
     const st=loanAt(d,y,m);
-    if(st.before||st.done||st.payment<=0)return;
+    if(st.before||st.payment<=0)return;
     const day=Math.min(d.day||1,dim);
+    const fixed = d.method==='확정이자';
     out.push({id:'d_'+d.id,date:`${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`,
       kind:'지출',cat:mode==='corp'?'이자비용':'대출 이자',amt:Math.round(st.payment),
-      memo:`${d.name} ${st.k}회차 (이자 ${won(st.interest)}${st.principal>0?' + 원금 '+won(st.principal):''})`,
+      memo:`${d.name} ${st.k}회차 (이자 ${won(st.interest)}${fixed?' · 확정이자':''}${st.principal>0?' + 원금 '+won(st.principal):''})`,
       auto:'대출',ev:'',evOk:true});
   });
   return out;
@@ -675,12 +703,15 @@ function pnl(mode,y,m){
   const tx=monthTx(mode,y,m);
   const inc={},exp={};
   let inTot=0,outTot=0,passive=0;
+  let repayTot=0;
   tx.forEach(t=>{
+    // 원금상환은 비용이 아니라 부채 감소 → 손익계산서에서 제외하고 따로 집계
+    if(t.bsOnly){ repayTot+=t.amt; return; }
     if(t.kind==='수입'){inc[t.cat]=(inc[t.cat]||0)+t.amt;inTot+=t.amt;
       if(PASSIVE.includes(t.cat))passive+=t.amt;}
     else if(t.kind==='지출'){exp[t.cat]=(exp[t.cat]||0)+t.amt;outTot+=t.amt;}
   });
-  return{inc,exp,inTot,outTot,passive,net:inTot-outTot,tx};
+  return{inc,exp,inTot,outTot,passive,repayTot,net:inTot-outTot,cash:inTot-outTot-repayTot,tx};
 }
 
 function bs(mode){
@@ -784,8 +815,11 @@ function dashPersonal(y,m){
   <div class="card">
     <h3>이번 달 요약</h3>
     <div class="row"><span class="lbl">총수입</span><span class="val in">${won(P.inTot)}</span></div>
-    <div class="row"><span class="lbl">총지출</span><span class="val out">${won(P.outTot)}</span></div>
-    <div class="row total"><span class="lbl">순현금흐름</span><span class="val ${P.net>=0?'in':'out'}">${won(P.net)}</span></div>
+    <div class="row"><span class="lbl">총지출 <span class="muted">(비용)</span></span><span class="val out">${won(P.outTot)}</span></div>
+    <div class="row total"><span class="lbl">손익</span><span class="val ${P.net>=0?'in':'out'}">${won(P.net)}</span></div>
+    ${P.repayTot>0?`
+    <div class="row"><span class="lbl">부채 원금상환 <span class="muted">(비용 아님)</span></span><span class="val asset">−${won(P.repayTot)}</span></div>
+    <div class="row total"><span class="lbl">실제 통장 증감</span><span class="val ${P.cash>=0?'in':'out'}">${won(P.cash)}</span></div>`:''}
   </div>
 
   <div class="card">
@@ -864,16 +898,79 @@ function groupBy(arr,catKey,valKey){
 
 /* ── 입력 ── */
 let addKind='지출';
+let RP_SEL=null;
 function setKind(k){addKind=k;render();}
+
+// 대출 원금상환 저장 → 부채에 상환기록 추가 + 내역에 표시
+function addRepay(){
+  const sel=document.getElementById('f_debt');
+  const id=sel?sel.value:RP_SEL;
+  const d=(S[MODE].debts||[]).find(x=>x.id===id);
+  if(!d){alert('대출을 선택하세요');return;}
+  const amt=+document.getElementById('f_amt').value;
+  if(!amt){alert('상환 금액을 입력하세요');return;}
+  const fd=getDate('f_date');
+  if(!fd){alert('날짜를 모두 입력하세요 (년/월/일)');return;}
+  const bal=loanBalanceNow(d);
+  if(amt>bal && !confirm(`상환액 ${won(amt)}이 현재 잔액 ${won(bal)}보다 큽니다. 그대로 저장할까요?`))return;
+  const rid=u();
+  d.repays=d.repays||[];
+  d.repays.push({id:rid,date:fd,amt:amt});
+  S[MODE].tx.push({id:'rp_'+rid, date:fd, kind:'지출',
+    cat:MODE==='corp'?'차입금 상환':'대출 원금상환',
+    amt:amt, memo:`${d.name}${document.getElementById('f_memo').value?' · '+document.getElementById('f_memo').value:''}`,
+    bsOnly:true, debtId:d.id, repayId:rid, ev:'', evOk:true});
+  save(); TAB='list'; render();
+}
 function vAdd(y,m){
-  const cats=CAT[MODE][addKind]||[];
   const today=new Date();
   const dv=`${y}-${String(m).padStart(2,'0')}-${String(Math.min(today.getDate(),daysIn(y,m))).padStart(2,'0')}`;
+  const seg=['수입','지출','대출상환'];
+
+  // ── 대출 원금상환 ──
+  if(addKind==='대출상환'){
+    const debts=S[MODE].debts||[];
+    return `<div class="card">
+      <h3>거래 입력</h3>
+      <label>구분</label>
+      <div class="segRow">
+        ${seg.map(k=>`<button class="${addKind===k?'on':''}" onclick="setKind('${k}')">${k}</button>`).join('')}
+      </div>
+      ${debts.length?`
+      <label>어느 대출을 갚으셨나요</label>
+      <select id="f_debt" onchange="render()">
+        ${debts.map(d=>`<option value="${d.id}" ${RP_SEL===d.id?'selected':''}>${d.name} · 잔액 ${won(loanBalanceNow(d))}</option>`).join('')}
+      </select>
+      ${(()=>{ const d=debts.find(x=>x.id===RP_SEL)||debts[0]; RP_SEL=d.id;
+        const bal=loanBalanceNow(d); const {P,r}=loanInfo(d);
+        return `<div class="repayBox">
+          <div class="kv"><span class="lbl">최초 원금</span><b>${won(P)}</b></div>
+          <div class="kv"><span class="lbl">이미 갚은 원금</span><b>${won(loanRepaidAll(d))}</b></div>
+          <div class="kv"><span class="lbl">현재 잔액</span><b class="out">${won(bal)}</b></div>
+          <div class="kv"><span class="lbl">상환방식</span><b>${d.method}</b></div>
+          ${d.method==='확정이자'
+            ? `<div class="repayNote">확정이자 조건입니다. 원금을 갚아도 <b>매월 이자는 최초 원금 ${won(P)} 기준 ${won(Math.round(P*r))}</b>으로 유지됩니다.</div>`
+            : `<div class="repayNote">원금을 갚으면 다음 달부터 이자가 줄어듭니다.</div>`}
+        </div>`;})()}
+      <label>날짜 <span class="muted">(실제 입금한 날)</span></label>
+      ${dateField('f_date',dv,'today')}
+      <label>상환 금액</label>
+      <input type="number" id="f_amt" inputmode="numeric" placeholder="0">
+      <label>메모</label>
+      <input type="text" id="f_memo" placeholder="예: 일부 상환">
+      <button class="btn" onclick="addRepay()">저장</button>
+      <div class="muted" style="margin-top:8px">원금상환은 비용이 아니라 부채 감소이므로 <b>손익계산서 지출에는 들어가지 않고</b>, 부채 잔액과 순현금흐름에 반영됩니다.</div>
+      `:`<div class="empty">등록된 대출이 없습니다</div>
+      <div class="muted">반복·대출 탭에서 대출을 먼저 등록해 주세요.</div>`}
+    </div>`;
+  }
+
+  const cats=CAT[MODE][addKind]||[];
   return `<div class="card">
     <h3>거래 입력</h3>
     <label>구분</label>
     <div class="segRow">
-      ${['수입','지출'].map(k=>`<button class="${addKind===k?'on':''}" onclick="setKind('${k}')">${k}</button>`).join('')}
+      ${seg.map(k=>`<button class="${addKind===k?'on':''}" onclick="setKind('${k}')">${k}</button>`).join('')}
     </div>
     <label>날짜 <span class="muted">(카드는 결제일이 아닌 사용일로 적으세요)</span></label>
     ${dateField('f_date',dv,'today')}
@@ -920,14 +1017,15 @@ function vList(y,m){
   tx.forEach(t=>{(byDay[t.date]=byDay[t.date]||[]).push(t)});
   return Object.keys(byDay).sort().reverse().map(d=>{
     const day=byDay[d];
-    const sum=day.reduce((s,t)=>s+(t.kind==='수입'?t.amt:-t.amt),0);
+    const sum=day.reduce((s,t)=>s+(t.kind==='수입'?t.amt:-t.amt),0);   // 현금 기준(상환 포함)
     return `<div class="card">
       <h3>${d.slice(5).replace('-','월 ')}일 <span style="float:right;color:${sum>=0?'var(--in)':'var(--out)'}">${won(sum)}</span></h3>
       ${day.map(t=>{
         const c=t.kind==='수입'?'var(--in)':'var(--out)';
         return `<div class="item">
-          <div class="ic" style="background:${c}">${t.kind==='수입'?'수':'지'}</div>
+          <div class="ic" style="background:${t.bsOnly?'var(--asset)':c}">${t.bsOnly?'상':(t.kind==='수입'?'수':'지')}</div>
           <div class="mid"><div class="n">${t.cat}
+            ${t.bsOnly?'<span class="tag bs">원금상환</span>':''}
             ${t.auto?`<span class="tag auto">${t.auto}</span>`:''}
             ${MODE==='corp'&&t.ev?`<span class="tag ${t.evOk?'good':'bad'}">${t.ev}</span>`:''}</div>
             <div class="s">${t.memo||''}${t.party?' · '+t.party:''}${t.prop?' · '+t.prop:''}</div></div>
@@ -936,7 +1034,15 @@ function vList(y,m){
         </div>`;}).join('')}
     </div>`;}).join('');
 }
-function delTx(id){S[MODE].tx=S[MODE].tx.filter(t=>t.id!==id);save();render();}
+function delTx(id){
+  const t=(S[MODE].tx||[]).find(x=>x.id===id);
+  // 원금상환 내역을 지우면 대출의 상환기록도 함께 지운다
+  if(t&&t.repayId){
+    const d=(S[MODE].debts||[]).find(x=>x.id===t.debtId);
+    if(d&&d.repays) d.repays=d.repays.filter(r=>r.id!==t.repayId);
+  }
+  S[MODE].tx=S[MODE].tx.filter(x=>x.id!==id);save();render();
+}
 
 /* ── 자산·부채 ── */
 function vBS(){
@@ -1030,7 +1136,7 @@ function vRecur(){
       <button class="${addKind==='지출'?'on':''}" onclick="setKind('지출')">지출</button>
     </div>
     <div class="grid2">
-      <div><label>분류</label><select id="r_cat">${CAT[MODE][addKind].map(c=>`<option>${c}</option>`).join('')}</select></div>
+      <div><label>분류</label><select id="r_cat">${(CAT[MODE][addKind]||CAT[MODE].지출).map(c=>`<option>${c}</option>`).join('')}</select></div>
       <div><label>금액</label><input type="number" id="r_amt" inputmode="numeric" placeholder="0"></div>
     </div>
     <div class="grid2">
@@ -1060,9 +1166,11 @@ function vRecur(){
     <label>상환방식</label>
     <select id="d_method" onchange="calcPreview()">
       <option value="만기일시">만기일시상환 (매월 이자만)</option>
+      <option value="확정이자">확정이자 (원금 갚아도 이자 고정)</option>
       <option value="원리금균등">원리금균등상환</option>
       <option value="원금균등">원금균등상환</option>
     </select>
+    <div class="muted" style="margin-top:6px">확정이자는 개인 차용에서 흔한 조건입니다. 원금을 일부 갚아도 매월 이자가 <b>최초 원금 기준</b>으로 그대로 나갑니다.</div>
 
     <div id="calcBox" class="freedom" style="margin-top:12px">
       <div class="muted">원금·기간·이율을 입력하면 월 납입금액이 자동 계산됩니다.</div>
@@ -1096,9 +1204,17 @@ function vRecur(){
           </div>
           <button class="del" onclick="delItem('debts','${d.id}')">×</button>
         </div>
+        <div class="row"><span class="lbl">최초 원금</span><span class="val">${won(info.P)}</span></div>
+        ${st.paid>0?`<div class="row"><span class="lbl">중도상환 누적</span><span class="val in">−${won(st.paid)}</span></div>`:''}
         <div class="row"><span class="lbl">남은 잔액</span><span class="val debt">${won(bal)}</span></div>
         <div class="row"><span class="lbl">이번 달 납입액${st.k>0?` (${st.k}회차)`:''}</span><span class="val">${won(st.payment)}</span></div>
         <div class="row"><span class="lbl">└ 이자 / 원금</span><span class="val" style="font-size:13px">${won(st.interest)} / ${won(st.principal)}</span></div>
+        <div class="row"><span class="lbl">상환방식</span><span class="val" style="font-size:13px">${d.method}</span></div>
+        ${d.method==='확정이자'?`<div class="repayNote">확정이자 — 원금을 갚아도 매월 이자는 최초 원금 ${won(info.P)} 기준 ${won(Math.round(info.P*info.r))}으로 유지됩니다.</div>`:''}
+        ${(d.repays||[]).length?`<div class="repayList">
+          ${d.repays.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(x=>
+            `<div class="kv"><span class="lbl">${x.date} 상환</span><b class="in">−${won(x.amt)}</b></div>`).join('')}
+        </div>`:''}
         <div class="row"><span class="lbl">상환 완료</span><span class="val">${loanEndLabel(d)}</span></div>
         <div class="bar" style="margin-top:8px"><i style="width:${pct}%;background:var(--debt)"></i></div>
         <div class="muted" style="text-align:right;margin-top:3px">${pct}% 상환</div>
@@ -1123,7 +1239,7 @@ function calcPreview(){
   const info=loanInfo(tmp);
   const first=loanAt({...tmp,start:start||new Date().toISOString().slice(0,10)},
     new Date(start||Date.now()).getFullYear(), new Date(start||Date.now()).getMonth()+1);
-  const totalInterest = method==='만기일시'
+  const totalInterest = (method==='만기일시'||method==='확정이자')
     ? P*info.r*info.n
     : (info.n>0 ? (method==='원리금균등' ? info.monthly*info.n-P
         : Array.from({length:info.n},(_,i)=>(P-(P/info.n)*i)*info.r).reduce((a,b)=>a+b,0)) : 0);
