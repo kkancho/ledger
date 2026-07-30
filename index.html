@@ -164,6 +164,10 @@ nav.bn button .i{display:block;font-size:17px;margin-bottom:2px}
 .mK i{display:block;font-size:10px;font-style:normal;color:#a8a29e;font-weight:600;margin-top:1px}
 .mV{font-size:13px;font-weight:800;text-align:right;font-variant-numeric:tabular-nums;
   word-break:keep-all}
+/* 눌러서 편집 */
+.item.tap{cursor:pointer;-webkit-tap-highlight-color:transparent}
+.item.tap:active{background:#fafaf9}
+.itemGo{font-size:16px;color:#d6d3d1;font-weight:800;flex:0 0 auto;margin-left:2px}
 /* ── 통계 도넛 ── */
 .donut{width:100%;height:auto;display:block;margin:2px 0 4px}
 .donut .dcT{font-size:10.5px;font-weight:700;fill:var(--sub)}
@@ -867,7 +871,7 @@ function autoTx(mode,y,m){
     if(!r.on)return;
     const day=Math.min(r.day||1,dim);
     out.push({id:'r_'+r.id,date:`${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`,
-      kind:r.kind,cat:r.cat,amt:r.amt,memo:r.memo,auto:'반복',ev:r.ev||'',evOk:true});
+      kind:r.kind,cat:r.cat,sub:r.sub||'',amt:r.amt,memo:r.memo,auto:'반복',ev:r.ev||'',evOk:true});
   });
   (D.debts||[]).forEach(d=>{
     const st=loanAt(d,y,m);
@@ -1000,23 +1004,29 @@ function render(){
   if(SHEET_ON) paintSheet();
 }
 
-/* ── 입력 시트 ── */
-let SHEET_ON=false;
-function openAdd(){
-  SHEET_ON=true;
+/* ── 바텀 시트 (입력 · 편집 공용) ── */
+let SHEET_ON=false, SHEET_VIEW='add', SHEET_ID=null;
+const SHEET_TITLE={add:'거래 입력', recur:'반복 거래 편집', debt:'대출 편집'};
+function openAdd(){ openSheet('add',null); }
+function openSheet(view,id){
+  SHEET_VIEW=view; SHEET_ID=id; SHEET_ON=true;
   document.getElementById('addSheet').classList.add('on');
   document.body.style.overflow='hidden';
+  const t=document.getElementById('sheetTitle');
+  if(t) t.textContent=SHEET_TITLE[view]||'입력';
   paintSheet();
 }
 function closeAdd(){
-  SHEET_ON=false;
+  SHEET_ON=false; SHEET_VIEW='add'; SHEET_ID=null;
   document.getElementById('addSheet').classList.remove('on');
   document.body.style.overflow='';
 }
 function paintSheet(){
   const el=document.getElementById('sheetBody');
   if(!el)return;
-  el.innerHTML=vAdd(CUR.getFullYear(),CUR.getMonth()+1);
+  el.innerHTML = SHEET_VIEW==='recur' ? vRecurEdit(SHEET_ID)
+               : SHEET_VIEW==='debt'  ? vDebtEdit(SHEET_ID)
+               : vAdd(CUR.getFullYear(),CUR.getMonth()+1);
 }
 
 /* ── 대시보드 ── */
@@ -1775,17 +1785,156 @@ function addDebt(){
 function delItem(k,id){S[MODE][k]=S[MODE][k].filter(x=>x.id!==id);save();render();}
 
 /* ── 반복·대출 (개인) ── */
+/* ── 반복 거래 편집 ── */
+let ER_KIND='지출', ER_CAT=null, ER_SUB=null;
+function openRecurEdit(id){
+  const r=(S[MODE].recur||[]).find(x=>x.id===id); if(!r)return;
+  ER_KIND=r.kind||'지출'; ER_CAT=r.cat||null; ER_SUB=r.sub||null;
+  openSheet('recur',id);
+}
+function erKind(k){ ER_KIND=k; ER_CAT=null; ER_SUB=null; paintSheet(); }
+function erCat(c){ ER_CAT=c; ER_SUB=null;
+  const b=document.getElementById('erSubBox'); if(b)b.innerHTML=erSubField(c); }
+function erSubField(cat){
+  const list=subsOf(MODE,ER_KIND,cat);
+  if(!list.length) return `<input type="hidden" id="e_sub" value="">`;
+  if(!ER_SUB||!list.includes(ER_SUB)) ER_SUB=list[0];
+  return `<label>소분류</label><select id="e_sub" onchange="ER_SUB=this.value">
+    ${list.map(s=>`<option ${s===ER_SUB?'selected':''}>${s}</option>`).join('')}</select>`;
+}
+function vRecurEdit(id){
+  const r=(S[MODE].recur||[]).find(x=>x.id===id);
+  if(!r) return '<div class="empty">항목을 찾을 수 없습니다</div>';
+  const cats=CAT[MODE][ER_KIND]||[];
+  if(!ER_CAT||!cats.includes(ER_CAT)) ER_CAT=cats.includes('미분류')?'미분류':cats[0];
+  return `<div class="card">
+    <label>구분</label>
+    <div class="segRow">
+      ${['수입','지출'].map(k=>`<button class="${ER_KIND===k?'on':''}" onclick="erKind('${k}')">${k}</button>`).join('')}
+    </div>
+    <label>분류</label>
+    <select id="e_cat" onchange="erCat(this.value)">
+      ${cats.map(c=>`<option ${c===ER_CAT?'selected':''}>${c}</option>`).join('')}</select>
+    <div id="erSubBox">${erSubField(ER_CAT)}</div>
+    <div class="grid2">
+      <div><label>금액</label><input type="number" id="e_amt" inputmode="numeric" value="${r.amt||''}"></div>
+      <div><label>매월 며칠</label><input type="number" id="e_day" min="1" max="31" value="${r.day||1}"></div>
+    </div>
+    <label>메모</label>
+    <input type="text" id="e_memo" value="${(r.memo||'').replace(/"/g,'&quot;')}">
+    <label>상태</label>
+    <select id="e_on">
+      <option value="1" ${r.on?'selected':''}>사용중 (매월 자동 기재)</option>
+      <option value="0" ${!r.on?'selected':''}>중지 (기재하지 않음)</option>
+    </select>
+    <button class="btn" onclick="saveRecurEdit('${r.id}')">저장</button>
+    <button class="btn sub danger" onclick="delRecurEdit('${r.id}')">이 반복 거래 삭제</button>
+  </div>`;
+}
+function saveRecurEdit(id){
+  const r=(S[MODE].recur||[]).find(x=>x.id===id); if(!r)return;
+  const g=k=>((document.getElementById(k)||{}).value||'');
+  const amt=+g('e_amt'); if(!amt){alert('금액을 입력하세요');return;}
+  r.kind=ER_KIND; r.cat=g('e_cat')||ER_CAT; r.sub=g('e_sub');
+  r.amt=amt; r.day=Math.min(31,Math.max(1,+g('e_day')||1));
+  r.memo=g('e_memo'); r.on=g('e_on')!=='0';
+  save(); closeAdd(); render();
+}
+function delRecurEdit(id){
+  if(!confirm('이 반복 거래를 삭제할까요?'))return;
+  S[MODE].recur=(S[MODE].recur||[]).filter(x=>x.id!==id);
+  save(); closeAdd(); render();
+}
+
+/* ── 대출 편집 ── */
+function openDebtEdit(id){ openSheet('debt',id); }
+function vDebtEdit(id){
+  const d=(S[MODE].debts||[]).find(x=>x.id===id);
+  if(!d) return '<div class="empty">항목을 찾을 수 없습니다</div>';
+  const info=loanInfo(d), st=loanAt(d,CUR.getFullYear(),CUR.getMonth()+1);
+  const METHODS=[['만기일시','만기일시상환 (매월 이자만)'],['확정이자','확정이자 (원금 갚아도 이자 고정)'],
+                 ['원리금균등','원리금균등상환'],['원금균등','원금균등상환']];
+  const ALERTS=[['','알림 안 받음'],['0','당일 아침'],['1','1일 전'],['3','3일 전'],['7','7일 전']];
+  return `<div class="card">
+    <label>대출명</label>
+    <input type="text" id="e_dname" value="${(d.name||'').replace(/"/g,'&quot;')}">
+    <div class="grid2">
+      <div><label>분류</label><select id="e_dcat">
+        ${CAT[MODE].부채.map(c=>`<option ${c===d.cat?'selected':''}>${c}</option>`).join('')}</select></div>
+      <div><label>대출 원금</label>
+        <input type="number" id="e_dprincipal" inputmode="numeric" value="${info.P||''}"></div>
+    </div>
+    <label>대출 시작일</label>
+    ${dateField('e_dstart',d.start||'')}
+    <label>만기일</label>
+    ${dateField('e_dend',d.end||'')}
+    <div class="grid2">
+      <div><label>연이율 %</label><input type="number" id="e_drate" step="0.01" value="${d.rate||0}"></div>
+      <div><label>매월 납입일</label><input type="number" id="e_dday" min="1" max="31" value="${d.day||1}"></div>
+    </div>
+    <label>상환방식</label>
+    <select id="e_dmethod">
+      ${METHODS.map(([v,t])=>`<option value="${v}" ${v===d.method?'selected':''}>${t}</option>`).join('')}</select>
+    <label>납입일 알림</label>
+    <select id="e_dalert">
+      ${ALERTS.map(([v,t])=>`<option value="${v}" ${String(d.alertDays??'')===v?'selected':''}>${t}</option>`).join('')}</select>
+    <div class="hr"></div>
+    <div class="row"><span class="lbl">이번 달 납입액</span><span class="val">${won(st.payment)}</span></div>
+    <div class="row"><span class="lbl">└ 이자 / 원금</span>
+      <span class="val" style="font-size:13px">${won(st.interest)} / ${won(st.principal)}</span></div>
+    <div class="row"><span class="lbl">남은 잔액</span><span class="val debt">${won(loanBalanceNow(d))}</span></div>
+    <button class="btn" onclick="saveDebtEdit('${d.id}')">저장</button>
+    <button class="btn sub danger" onclick="delDebtEdit('${d.id}')">이 대출 삭제</button>
+  </div>
+  ${(d.repays||[]).length?`<div class="card">
+    <h3>중도상환 이력</h3>
+    ${d.repays.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(x=>
+      `<div class="item"><div class="ic" style="background:var(--asset)">상</div>
+       <div class="mid"><div class="n">${x.date}</div><div class="s">원금 상환</div></div>
+       <div class="amt in">−${won(x.amt)}</div>
+       <button class="del" onclick="delRepay('${d.id}','${x.id}')">×</button></div>`).join('')}
+    <div class="muted" style="margin-top:8px">여기서 지우면 내역의 원금상환 기록도 함께 삭제됩니다.</div>
+  </div>`:''}`;
+}
+function saveDebtEdit(id){
+  const d=(S[MODE].debts||[]).find(x=>x.id===id); if(!d)return;
+  const g=k=>((document.getElementById(k)||{}).value||'');
+  const name=g('e_dname').trim(); if(!name){alert('대출명을 입력하세요');return;}
+  const P=+g('e_dprincipal'); if(!P){alert('대출 원금을 입력하세요');return;}
+  d.name=name; d.cat=g('e_dcat'); d.principal=P; d.bal=P;
+  d.rate=+g('e_drate')||0;
+  d.start=getDate('e_dstart')||d.start;
+  d.end=getDate('e_dend')||'';
+  d.day=Math.min(31,Math.max(1,+g('e_dday')||1));
+  d.method=g('e_dmethod'); d.alertDays=g('e_dalert');
+  save(); closeAdd(); render();
+}
+function delDebtEdit(id){
+  const d=(S[MODE].debts||[]).find(x=>x.id===id);
+  if(!confirm(`"${d?d.name:''}" 대출을 삭제할까요?\n중도상환 기록과 내역도 함께 지워집니다.`))return;
+  S[MODE].tx=(S[MODE].tx||[]).filter(t=>t.debtId!==id);
+  S[MODE].debts=(S[MODE].debts||[]).filter(x=>x.id!==id);
+  save(); closeAdd(); render();
+}
+function delRepay(debtId,repayId){
+  if(!confirm('이 상환 기록을 삭제할까요?'))return;
+  const d=(S[MODE].debts||[]).find(x=>x.id===debtId);
+  if(d&&d.repays) d.repays=d.repays.filter(r=>r.id!==repayId);
+  S[MODE].tx=(S[MODE].tx||[]).filter(t=>t.repayId!==repayId);
+  save(); paintSheet(); render();
+}
+
 function vRecur(){
   const R=S[MODE].recur||[];
   return `<div class="card">
-    <h3>매월 반복되는 수입·지출</h3>
-    ${R.length?R.map(r=>`<div class="item">
+    <h3>매월 반복되는 수입·지출 <span class="muted">(눌러서 편집)</span></h3>
+    ${R.length?R.map(r=>`<div class="item tap" onclick="openRecurEdit('${r.id}')">
       <div class="ic" style="background:${r.kind==='수입'?'var(--in)':'var(--out)'}">${r.kind==='수입'?'수':'지'}</div>
-      <div class="mid"><div class="n">${r.cat} ${r.on?'':'<span class="tag">중지</span>'}</div>
+      <div class="mid"><div class="n">${r.cat}${r.sub?' › '+r.sub:''} ${r.on?'':'<span class="tag">중지</span>'}</div>
         <div class="s">매월 ${r.day}일 · ${r.memo||''}</div></div>
       <div class="amt ${r.kind==='수입'?'in':'out'}">${wonS(r.amt)}</div>
-      <button class="del" onclick="toggleRecur('${r.id}')">${r.on?'⏸':'▶'}</button>
-      <button class="del" onclick="delItem('recur','${r.id}')">×</button></div>`).join('')
+      <button class="del" onclick="event.stopPropagation();toggleRecur('${r.id}')">${r.on?'⏸':'▶'}</button>
+      <span class="itemGo">›</span></div>`).join('')
       :'<div class="empty">등록된 반복 거래가 없습니다</div>'}
     <div class="hr"></div>
     <label>구분</label>
@@ -1846,7 +1995,7 @@ function vRecur(){
   </div>
 
   <div class="card">
-    <h3>대출 상환 스케줄</h3>
+    <h3>대출 상환 스케줄 <span class="muted">(제목을 눌러서 편집)</span></h3>
     ${(S[MODE].debts||[]).length?S[MODE].debts.map(d=>{
       const info=loanInfo(d);
       const st=loanAt(d,CUR.getFullYear(),CUR.getMonth()+1);
@@ -1855,12 +2004,12 @@ function vRecur(){
       return `<div style="padding:12px 0;border-bottom:1px solid #f5f5f4">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
           <div class="ic" style="background:var(--debt);width:34px;height:34px;border-radius:9px;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:800">貸</div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:14px;font-weight:700">${d.name}</div>
+          <div style="flex:1;min-width:0;cursor:pointer" onclick="openDebtEdit('${d.id}')">
+            <div style="font-size:14px;font-weight:700">${d.name} <span class="itemGo">›</span></div>
             <div class="muted">${d.cat} · 연 ${d.rate}% · 매월 ${d.day}일
               ${d.alertDays!==''&&d.alertDays!=null?` · 🔔 ${d.alertDays==0?'당일':d.alertDays+'일 전'}`:''}</div>
           </div>
-          <button class="del" onclick="delItem('debts','${d.id}')">×</button>
+          <button class="del" onclick="openDebtEdit('${d.id}')">✏️</button>
         </div>
         <div class="row"><span class="lbl">최초 원금</span><span class="val">${won(info.P)}</span></div>
         ${st.paid>0?`<div class="row"><span class="lbl">중도상환 누적</span><span class="val in">−${won(st.paid)}</span></div>`:''}
@@ -1983,7 +2132,7 @@ function toggleRecur(id){const r=S[MODE].recur.find(x=>x.id===id);if(r){r.on=!r.
 function addRecur(){
   const a=+document.getElementById('r_amt').value;
   if(!a){alert('금액을 입력하세요');return;}
-  S[MODE].recur.push({id:u(),kind:addKind,cat:document.getElementById('r_cat').value,amt:a,
+  S[MODE].recur.push({id:u(),kind:addKind,cat:document.getElementById('r_cat').value,sub:'',amt:a,
     day:+document.getElementById('r_day').value||1,memo:document.getElementById('r_memo').value,on:true});
   save();render();
 }
