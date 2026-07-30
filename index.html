@@ -152,6 +152,31 @@ body.corp nav.bn button.on{color:var(--corp)}
 .evtRow button:active{background:#f5f5f4}
 .disc{background:#fafaf9;border:1px dashed var(--line);border-radius:10px;
   padding:10px;font-size:11.5px;color:var(--sub);line-height:1.55;margin-top:12px}
+/* 오늘의 주문 가이드 */
+.gHead{display:flex;justify-content:space-between;align-items:center;cursor:pointer;
+  -webkit-tap-highlight-color:transparent}
+.gName{font-size:19px;font-weight:800;letter-spacing:-.3px}
+.gArrow{font-size:12px;font-weight:700;color:var(--sub);margin-left:4px}
+.gSub{font-size:12px;color:var(--sub);margin-top:2px}
+.gBlock{margin-top:14px}
+.gTitle{font-size:12px;font-weight:800;padding:4px 9px;border-radius:6px;
+  display:inline-block;color:#fff;margin-bottom:6px}
+.gTitle.buy{background:var(--in)}
+.gTitle.sell{background:var(--debt)}
+.gRow{display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:9px;
+  margin-bottom:5px;background:#fafaf9;border-left:4px solid var(--line)}
+.gRow.buy{border-left-color:var(--in)}
+.gRow.sell{border-left-color:var(--debt)}
+.gPx{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;min-width:88px}
+.gQty{font-size:15px;font-weight:700;color:var(--ink)}
+.gAmt{margin-left:auto;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
+.gNone{font-size:13px;color:var(--sub);padding:8px 2px}
+.gLad{font-size:11.5px;color:var(--sub);line-height:1.5;margin-top:4px;padding:0 2px}
+.gBe{margin-top:12px;font-size:12px;color:var(--sub);background:#fffbeb;
+  border-radius:8px;padding:8px 10px}
+.gEvt{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
+.gEvtT{font-size:12px;font-weight:800;color:var(--sub);margin-bottom:7px}
+.gNothing{font-size:11.5px;color:var(--sub);margin-top:7px;line-height:1.5}
 </style>
 </head>
 <body class="personal">
@@ -319,7 +344,7 @@ function splitDefaults(){
     sellTarget:10,        // 지정가 매도 목표 %
     frontRatio:50,        // 전반부에서 기준선에 배분할 비율 %
     partRatio:25,         // 분할매도 비율 %
-    ladderSteps:8,        // 추가매수 사다리 단계
+    ladderSteps:3,        // 추가매수 사다리 단계
     ladderDrop:7,         // 사다리 단계별 하락률 %
     avg:0, qty:0, turn:0, // 평단 / 보유수량 / 회차
     closes:[],            // 최근 종가 (소진구간 기준선 산정용)
@@ -672,12 +697,12 @@ function render(){
   const tabs=MODE==='personal'
     ?[['dash','📊','대시보드'],['add','✏️','입력'],['list','📋','내역'],['bs','🏦','자산·부채'],['recur','🔁','반복·대출'],['split','📐','분할매수']]
     :[['dash','📊','대시보드'],['add','✏️','입력'],['list','📋','내역'],['bs','🏦','자산·부채'],['tax','🧾','증빙·세무']];
-  const navKey = TAB==='splitNew' ? 'split' : TAB;
+  const navKey = (TAB==='splitNew'||TAB==='splitDetail') ? 'split' : TAB;
   document.getElementById('nav').innerHTML=tabs.map(([k,i,n])=>
     `<button class="${navKey===k?'on':''}" onclick="go('${k}')"><span class="i">${i}</span>${n}</button>`).join('');
   const V=document.getElementById('view');
   const fn={dash:vDash,add:vAdd,list:vList,bs:vBS,recur:vRecur,tax:vTax,
-            split:vSplit,splitNew:vSplitNew}[TAB]||vDash;
+            split:vSplit,splitNew:vSplitNew,splitDetail:vSplitDetail}[TAB]||vDash;
   V.innerHTML=fn(y,m);
 }
 
@@ -1160,19 +1185,97 @@ function addRecur(){
   save();render();
 }
 
-/* ── 분할매수 계산기 화면 ── */
+/* ── 분할매수 계산기 ──
+   1단 화면 = 오늘의 주문 가이드 (종목별 카드)
+   2단 화면 = 종목명을 누르면 나오는 상세 설정              */
 let SPLIT_SEL=null;
+
 function vSplit(){
   const list=S.personal.splits||[];
   if(!list.length) return `
     <div class="card">
       <h3>분할매수 계산기</h3>
-      <div class="empty">등록된 사이클이 없습니다</div>
-      <div class="muted">원금을 여러 회차로 나눠 매수하는 방식을 쓰실 때, 매일의 주문 가격과 수량을 계산해주는 도구입니다. 파라미터는 직접 정하시면 됩니다.</div>
-      <button class="btn" onclick="go('splitNew')">＋ 새 사이클 만들기</button>
+      <div class="empty">등록된 종목이 없습니다</div>
+      <div class="muted">원금을 여러 회차로 나눠 매수하실 때, 그날 걸어야 할 주문 가격과 수량을 계산해 알려드립니다.</div>
+      <button class="btn" onclick="go('splitNew')">＋ 종목 등록하기</button>
     </div>
     ${splitDisclaimer()}`;
 
+  const today=new Date();
+  const dstr=`${today.getMonth()+1}월 ${today.getDate()}일`;
+  return `
+  <div class="card">
+    <h3>${dstr} 주문 가이드</h3>
+    <div class="muted">아래 가격과 수량 그대로 증권사 앱에 걸어주세요. 종목명을 누르면 상세 설정이 열립니다.</div>
+  </div>
+  ${list.map(p=>splitGuide(p)).join('')}
+  <div class="card">
+    <button class="btn sub" onclick="go('splitNew')">＋ 종목 추가</button>
+  </div>
+  ${splitDisclaimer()}`;
+}
+
+/* 종목 1개의 오늘 할 일 카드 */
+function splitGuide(p){
+  const b=splitBaseline(p), F=splitFee(p);
+  const buys=splitBuyOrders(p), sells=splitSellOrders(p);
+  const a=+p.a||40;
+  const key=buys.filter(o=>o.qty>0 && o.key);
+  const lad=buys.filter(o=>o.qty>0 && !o.key);
+  const lastClose=(p.closes||[]).length?p.closes[p.closes.length-1]:0;
+  const farWarn = lastClose>0 && b.price>lastClose*1.2;
+  const line=(o,cls)=>`<div class="gRow ${cls}">
+      <span class="gPx">$${o.px?o.px.toFixed(2):'종가'}</span>
+      <span class="gQty">${o.qty}주</span>
+      <span class="gAmt">${o.px?'$'+(o.px*o.qty).toFixed(0):'—'}</span>
+    </div>`;
+
+  return `
+  <div class="card">
+    <div class="gHead" onclick="splitOpen('${p.id}')">
+      <div>
+        <div class="gName">${p.name||'(이름없음)'} <span class="gArrow">설정 ›</span></div>
+        <div class="gSub">${PHASE_LABEL[b.phase]} · ${p.turn.toFixed(2).replace(/\.?0+$/,'')}/${a}회차 · 잔금 $${Math.round(+p.cash||0).toLocaleString()}</div>
+      </div>
+      <span class="badge ${PHASE_CLS[b.phase]}">${Math.min(100,Math.round(p.turn/a*100))}%</span>
+    </div>
+
+    ${p.firstDay?`<div class="alert" style="margin:10px 0"><div class="t">오늘은 매수 없이 매도만</div><div class="d">소진구간 첫날 설정입니다.</div></div>`:''}
+
+    <div class="gBlock">
+      <div class="gTitle buy">매수 걸 것</div>
+      ${key.length?key.map(o=>line(o,'buy')).join('')
+        :'<div class="gNone">오늘 매수 주문 없음</div>'}
+      ${lad.length?`<div class="gLad">더 떨어질 때 대비 (각 1주): ${lad.map(o=>'$'+o.px.toFixed(2)).join(' · ')}</div>`:''}
+    </div>
+
+    <div class="gBlock">
+      <div class="gTitle sell">매도 걸 것</div>
+      ${sells.length?sells.map(o=>line(o,'sell')).join('')
+        :'<div class="gNone">보유수량이 없습니다</div>'}
+      ${sells.length>1?`<div class="gLad">위쪽 $${sells[sells.length-1].px.toFixed(2)} 가 전부 팔리면 이 사이클은 끝입니다.</div>`:''}
+    </div>
+
+    ${p.avg>0&&F.on?`<div class="gBe">본전 가격 <b>$${splitBreakeven(p).toFixed(2)}</b> · 이 아래로 팔면 손실 (수수료 포함)</div>`:''}
+    ${farWarn?`<div class="alert" style="margin-top:10px"><div class="t">매도가가 최근 종가보다 20% 이상 높습니다</div><div class="d">증권사에서 주문이 거부될 수 있습니다.</div></div>`:''}
+
+    <div class="gEvt">
+      <div class="gEvtT">장 마감 후 — 어제 체결된 것을 눌러주세요</div>
+      <div class="evtRow">
+        <button onclick="splitEvent('${p.id}','full')">매수 다 됨</button>
+        <button onclick="splitEvent('${p.id}','half')">매수 절반만</button>
+        <button onclick="splitEvent('${p.id}','part')">아래쪽 매도됨</button>
+        <button onclick="splitEvent('${p.id}','target')">위쪽 전량 매도</button>
+      </div>
+      <div class="gNothing">아무것도 안 됐으면 누르지 마세요 — 내일 같은 주문을 그대로 걸면 됩니다.</div>
+    </div>
+  </div>`;
+}
+function splitOpen(id){ SPLIT_SEL=id; TAB='splitDetail'; render(); }
+
+function vSplitDetail(){
+  const list=S.personal.splits||[];
+  if(!list.length){ TAB='split'; return vSplit(); }
   if(!SPLIT_SEL||!list.find(x=>x.id===SPLIT_SEL)) SPLIT_SEL=list[0].id;
   const p=list.find(x=>x.id===SPLIT_SEL);
   const b=splitBaseline(p), unit=splitUnitBuy(p), F=splitFee(p);
@@ -1184,11 +1287,11 @@ function vSplit(){
 
   return `
   <div class="card">
-    <h3>사이클 선택</h3>
+    <button class="btn sub" onclick="go('split')">‹ 오늘의 주문 가이드로</button>
+    <label style="margin-top:10px">보고 있는 종목</label>
     <select onchange="SPLIT_SEL=this.value;render()">
       ${list.map(x=>`<option value="${x.id}" ${x.id===p.id?'selected':''}>${x.name||'(이름없음)'} · ${x.a}분할</option>`).join('')}
     </select>
-    <button class="btn sub" onclick="go('splitNew')">＋ 새 사이클</button>
   </div>
 
   <div class="card">
@@ -1334,7 +1437,7 @@ function vSplit(){
 
 function splitDisclaimer(){
   return `<div class="disc">
-    이 화면은 <b>입력하신 파라미터로 산술 계산만 수행하는 계산기</b>입니다.
+    이 화면은 <b>대표님이 직접 정한 설정값으로 산술 계산만 수행하는 계산기</b>입니다.
     특정 매매 기법이나 종목을 권유하지 않으며, 매매 지시나 투자 자문이 아닙니다.
     표시된 값은 사용자가 스스로 정한 규칙에 따른 계산 결과이며, 실제 주문·투자 판단과 그 결과에 대한 책임은 전적으로 사용자에게 있습니다.
     레버리지 상품은 원금 손실 위험이 큽니다.
@@ -1435,9 +1538,9 @@ function splitSaveCfg(id){
   save(); render();
 }
 function splitDel(id){
-  if(!confirm('이 사이클을 삭제할까요?'))return;
+  if(!confirm('이 종목을 삭제할까요?'))return;
   S.personal.splits=(S.personal.splits||[]).filter(x=>x.id!==id);
-  SPLIT_SEL=null; save(); render();
+  SPLIT_SEL=null; TAB='split'; save(); render();
 }
 
 /* ── 증빙·세무 (법인) ── */
