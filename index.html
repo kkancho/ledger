@@ -81,6 +81,15 @@ input,select,textarea{width:100%;padding:10px;border:1px solid var(--line);borde
 input:focus,select:focus,textarea:focus{outline:2px solid var(--personal);outline-offset:-1px}
 body.corp input:focus,body.corp select:focus,body.corp textarea:focus{outline-color:var(--corp)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.dateGroup{display:flex;align-items:center;gap:5px}
+.dateGroup input{text-align:center;padding:10px 2px;font-variant-numeric:tabular-nums;
+  -moz-appearance:textfield;min-width:0}
+.dateGroup input::-webkit-outer-spin-button,
+.dateGroup input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.dateGroup .yy{flex:1.5} .dateGroup .mm,.dateGroup .dd{flex:1}
+.dateGroup span{font-size:12.5px;font-weight:700;color:var(--sub);flex:0 0 auto}
+.dateGroup .todayBtn{flex:0 0 auto;border:1px solid var(--line);background:#fff;border-radius:8px;
+  padding:9px 10px;font-size:12px;font-weight:700;color:var(--sub);cursor:pointer;font-family:inherit;margin-left:2px}
 .btn{width:100%;padding:12px;border:0;border-radius:10px;background:var(--personal);color:#fff;
   font-size:15px;font-weight:800;cursor:pointer;margin-top:14px;font-family:inherit}
 body.corp .btn{background:var(--corp)}
@@ -120,6 +129,29 @@ body.corp nav.bn button.on{color:var(--corp)}
 .alert .t{font-size:13px;font-weight:800;color:var(--warn);margin-bottom:3px}
 .alert .d{font-size:12.5px;color:#991b1b}
 .hr{height:1px;background:var(--line);margin:12px 0}
+
+/* ── 분할매수 계산기 ── */
+.ordTbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+.ordTbl th{background:#f5f5f4;color:var(--sub);font-size:11px;font-weight:800;
+  padding:6px 4px;text-align:right;border-bottom:1px solid var(--line)}
+.ordTbl th:first-child{text-align:left}
+.ordTbl td{padding:6px 4px;text-align:right;border-bottom:1px solid #f5f5f4;
+  font-variant-numeric:tabular-nums}
+.ordTbl td:first-child{text-align:left;color:var(--sub);font-size:12px}
+.ordTbl tr.key td{font-weight:800;background:#fffbeb}
+.ordTbl tfoot td{font-weight:800;border-top:1px solid var(--ink);border-bottom:0}
+.badge{display:inline-block;font-size:10.5px;font-weight:800;padding:3px 8px;
+  border-radius:6px;background:var(--ink);color:#fff}
+.badge.f{background:var(--in)} .badge.s{background:var(--debt)} .badge.x{background:var(--warn)}
+.kv{display:flex;justify-content:space-between;font-size:13px;padding:5px 0}
+.kv+.kv{border-top:1px solid #f5f5f4}
+.kv b{font-variant-numeric:tabular-nums}
+.evtRow{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+.evtRow button{padding:10px 4px;border:1px solid var(--line);background:#fff;border-radius:9px;
+  font-size:12.5px;font-weight:700;color:var(--ink);cursor:pointer;font-family:inherit}
+.evtRow button:active{background:#f5f5f4}
+.disc{background:#fafaf9;border:1px dashed var(--line);border-radius:10px;
+  padding:10px;font-size:11.5px;color:var(--sub);line-height:1.55;margin-top:12px}
 </style>
 </head>
 <body class="personal">
@@ -199,7 +231,7 @@ const TAXCAL=[
 /* ═══════════════ 초기 상태 ═══════════════ */
 function blank(){
   return{
-    personal:{tx:[],assets:[],debts:[],recur:[]},
+    personal:{tx:[],assets:[],debts:[],recur:[],splits:[]},
     corp:{tx:[],assets:[],debts:[],recur:[],props:[],adv:[]}
   };
 }
@@ -258,6 +290,8 @@ function sample(){
 function u(){return Math.random().toString(36).slice(2,10)}
 
 let S=load()||blank();
+// 구버전 데이터 호환
+if(!S.personal.splits) S.personal.splits=[];
 let MODE='personal';
 let TAB='dash';
 let CUR=new Date();
@@ -270,6 +304,184 @@ const wonS=n=>{const a=Math.abs(n);
   return n.toLocaleString('ko-KR');};
 const ym=dt=>`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
 const daysIn=(y,m)=>new Date(y,m,0).getDate();
+
+/* ═══════════════ 범용 분할매수 계산기 ═══════════════ */
+/* 사용자가 입력한 파라미터로 주문 가격·수량을 계산해 보여주는 도구입니다.
+   특정 매매 기법을 권유하거나 매매를 지시하지 않습니다. */
+
+function splitDefaults(){
+  return{
+    id:u(), name:'',
+    principal:0,          // 원금
+    cash:0,               // 잔금
+    a:40,                 // 분할수
+    M:10,                 // 목표수익률 기준 %
+    sellTarget:10,        // 지정가 매도 목표 %
+    frontRatio:50,        // 전반부에서 기준선에 배분할 비율 %
+    partRatio:25,         // 분할매도 비율 %
+    ladderSteps:8,        // 추가매수 사다리 단계
+    ladderDrop:7,         // 사다리 단계별 하락률 %
+    avg:0, qty:0, turn:0, // 평단 / 보유수량 / 회차
+    closes:[],            // 최근 종가 (소진구간 기준선 산정용)
+    useSMA:true,          // 소진구간에서 종가평균을 기준선으로 사용
+    firstDay:false        // 소진 첫날 (매수 없음)
+  };
+}
+
+// 구간 판정
+function splitPhase(p){
+  const a=+p.a||1;
+  if(p.turn >= a-1) return 'exhaust';
+  return p.turn < a/2 ? 'front' : 'back';
+}
+const PHASE_LABEL={front:'전반부', back:'후반부', exhaust:'소진구간'};
+const PHASE_CLS={front:'f', back:'s', exhaust:'x'};
+
+// 기준선 계산
+function splitBaseline(p){
+  const phase=splitPhase(p);
+  const a=+p.a||1, M=+p.M||0;
+  if(phase==='exhaust' && p.useSMA && (p.closes||[]).length>0){
+    const avgClose=p.closes.reduce((s,c)=>s+c,0)/p.closes.length;
+    return{ phase, price:avgClose, pct:p.avg>0?(avgClose/p.avg-1)*100:0, src:'종가평균' };
+  }
+  const pct = M * (1 - 2*p.turn/a);
+  return{ phase, price:p.avg*(1+pct/100), pct, src:'평단기준' };
+}
+
+// 1회 매수금
+function splitUnitBuy(p){
+  const phase=splitPhase(p), a=+p.a||1;
+  if(phase==='exhaust') return (+p.cash||0)/4;
+  const left=Math.max(0.01, a-p.turn);
+  return (+p.cash||0)/left;
+}
+
+// 매수 주문표
+function splitBuyOrders(p){
+  const b=splitBaseline(p), unit=splitUnitBuy(p);
+  const out=[];
+  if(p.firstDay && b.phase==='exhaust') return out;   // 소진 첫날은 매수 없음
+  const buyPx = Math.max(0.01, b.price - 0.01);       // 매도와 겹침 방지
+  if(b.phase==='front'){
+    const r=(+p.frontRatio||50)/100;
+    const a1=unit*r, a2=unit*(1-r);
+    if(buyPx>0) out.push({label:'기준선', px:buyPx, qty:Math.floor(a1/buyPx), key:true});
+    if(p.avg>0) out.push({label:'평단', px:p.avg, qty:Math.floor(a2/p.avg), key:true});
+  }else{
+    if(buyPx>0) out.push({label:'기준선', px:buyPx, qty:Math.floor(unit/buyPx), key:true});
+  }
+  // 추가매수 사다리
+  const base = out.length ? out[out.length-1].px : buyPx;
+  const drop=(+p.ladderDrop||0)/100;
+  let px=base;
+  for(let i=0;i<(+p.ladderSteps||0);i++){
+    px = px*(1-drop);
+    if(px<=0.01)break;
+    out.push({label:'추가 '+(i+1), px:Math.round(px*100)/100, qty:1});
+  }
+  return out;
+}
+
+// 매도 주문표
+function splitSellOrders(p){
+  const b=splitBaseline(p);
+  const qty=Math.floor(+p.qty||0);
+  const out=[];
+  if(qty<=0) return out;
+  if(b.phase==='exhaust'){
+    const n=Math.max(2,Math.round((+p.a||40)/2));
+    const part=Math.floor(qty/n);
+    if(p.firstDay){
+      out.push({label:'전량기준 분할 (종가매도)', px:null, qty:part, key:true, note:'MOC'});
+    }else{
+      out.push({label:'기준선', px:b.price, qty:part, key:true});
+    }
+    const rest=qty-part;
+    if(rest>0) out.push({label:'목표가', px:p.avg*(1+(+p.sellTarget||0)/100), qty:rest});
+  }else{
+    const part=Math.floor(qty*(+p.partRatio||25)/100);
+    if(part>0) out.push({label:'기준선', px:b.price, qty:part, key:true});
+    const rest=qty-part;
+    if(rest>0) out.push({label:'목표가', px:p.avg*(1+(+p.sellTarget||0)/100), qty:rest});
+  }
+  return out;
+}
+
+// 회차 이벤트 적용
+function splitEvent(id,kind){
+  const p=(S.personal.splits||[]).find(x=>x.id===id);
+  if(!p)return;
+  const a=+p.a||40;
+  const ex = splitPhase(p)==='exhaust';
+  // 회차 갱신 규칙
+  //  · 매수 체결  → 소진구간에서는 남은 여력(a−회차)의 25%만, 그 전에는 매수분(1 또는 0.5)만큼 증가
+  //  · 분할매도    → 매도한 비중만큼 회차를 되돌림
+  //                  (일반구간: 분할매도 비율,  소진구간: 매도수량 규칙 1/(분할수÷2) = 2/분할수)
+  //  · 목표가 전량매도 → 사이클 종료 (원금 상태로 복귀)
+  if(kind==='full')      p.turn = ex ? p.turn + (a-p.turn)*0.25 : p.turn + 1;
+  else if(kind==='half') p.turn = ex ? p.turn + (a-p.turn)*0.25 : p.turn + 0.5;
+  else if(kind==='part') p.turn = ex ? p.turn * (1 - 2/a) : p.turn * (1-(+p.partRatio||25)/100);
+  else if(kind==='target'||kind==='reset'){
+    p.turn=0; p.qty=0; p.avg=0; p.cash=+p.principal||0;
+    p.closes=[]; p.firstDay=false; p.firstDayDone=false;
+  }
+  p.turn = Math.max(0, Math.round(p.turn*100000)/100000);
+  if(splitPhase(p)==='exhaust' && kind!=='reset' && kind!=='target' && p.turn>=a-1 && !p.firstDayDone){
+    p.firstDay=true; p.firstDayDone=true;
+  }
+  if(kind==='part') p.firstDay=false;
+  save();render();
+  if(kind==='target') alert('사이클을 종료했습니다.\n실제 매도대금이 원금과 다르면 아래 원금·잔금을 수정해 주세요.');
+}
+
+/* ── 직접 입력형 날짜 필드 (년/월/일 각각 타이핑) ── */
+function dateField(id,val,opt){
+  const p=(val||'').split('-');
+  const y=p[0]||'', m=p[1]?+p[1]:'', d=p[2]?+p[2]:'';
+  return `<div class="dateGroup">
+    <input type="number" class="yy" id="${id}_y" inputmode="numeric" placeholder="2026"
+      value="${y}" oninput="dgStep('${id}','y',this)">
+    <span>년</span>
+    <input type="number" class="mm" id="${id}_m" inputmode="numeric" placeholder="7" min="1" max="12"
+      value="${m}" oninput="dgStep('${id}','m',this)">
+    <span>월</span>
+    <input type="number" class="dd" id="${id}_d" inputmode="numeric" placeholder="15" min="1" max="31"
+      value="${d}" oninput="dgStep('${id}','d',this)">
+    <span>일</span>
+    ${opt==='today'?`<button type="button" class="todayBtn" onclick="setToday('${id}')">오늘</button>`:''}
+  </div>`;
+}
+function dgStep(id,part,el){
+  let v=el.value;
+  if(part==='y'){
+    if(v.length>4){el.value=v.slice(0,4);v=el.value;}
+    if(v.length>=4){const n=document.getElementById(id+'_m');if(n)n.focus();}
+  }
+  if(part==='m'){
+    if(+v>12)el.value=12;
+    if(v.length>=2||+v>1){const n=document.getElementById(id+'_d');if(n)n.focus();}
+  }
+  if(part==='d'){
+    const y=+(document.getElementById(id+'_y')||{}).value||2026;
+    const mm=+(document.getElementById(id+'_m')||{}).value||1;
+    const max=daysIn(y,mm);
+    if(+v>max)el.value=max;
+  }
+  if(typeof calcPreview==='function')calcPreview();
+}
+function setToday(id){
+  const t=new Date();
+  const set=(k,v)=>{const e=document.getElementById(id+'_'+k);if(e)e.value=v;};
+  set('y',t.getFullYear()); set('m',t.getMonth()+1); set('d',t.getDate());
+  if(typeof calcPreview==='function')calcPreview();
+}
+function getDate(id){
+  const g=k=>+(document.getElementById(id+'_'+k)||{}).value||0;
+  const y=g('y'), m=g('m'), d=g('d');
+  if(!y||!m||!d)return '';
+  return `${y}-${String(m).padStart(2,'0')}-${String(Math.min(d,daysIn(y,m))).padStart(2,'0')}`;
+}
 
 /* ── 대출 계산 엔진 ── */
 // 시작일~만기일 사이 개월 수
@@ -429,12 +641,14 @@ function render(){
   const y=CUR.getFullYear(),m=CUR.getMonth()+1;
   document.getElementById('monthLabel').textContent=`${y}.${String(m).padStart(2,'0')}`;
   const tabs=MODE==='personal'
-    ?[['dash','📊','대시보드'],['add','✏️','입력'],['list','📋','내역'],['bs','🏦','자산·부채'],['recur','🔁','반복·대출']]
+    ?[['dash','📊','대시보드'],['add','✏️','입력'],['list','📋','내역'],['bs','🏦','자산·부채'],['recur','🔁','반복·대출'],['split','📐','분할매수']]
     :[['dash','📊','대시보드'],['add','✏️','입력'],['list','📋','내역'],['bs','🏦','자산·부채'],['tax','🧾','증빙·세무']];
+  const navKey = TAB==='splitNew' ? 'split' : TAB;
   document.getElementById('nav').innerHTML=tabs.map(([k,i,n])=>
-    `<button class="${TAB===k?'on':''}" onclick="go('${k}')"><span class="i">${i}</span>${n}</button>`).join('');
+    `<button class="${navKey===k?'on':''}" onclick="go('${k}')"><span class="i">${i}</span>${n}</button>`).join('');
   const V=document.getElementById('view');
-  const fn={dash:vDash,add:vAdd,list:vList,bs:vBS,recur:vRecur,tax:vTax}[TAB]||vDash;
+  const fn={dash:vDash,add:vAdd,list:vList,bs:vBS,recur:vRecur,tax:vTax,
+            split:vSplit,splitNew:vSplitNew}[TAB]||vDash;
   V.innerHTML=fn(y,m);
 }
 
@@ -579,7 +793,7 @@ function vAdd(y,m){
       ${['수입','지출'].map(k=>`<button class="${addKind===k?'on':''}" onclick="setKind('${k}')">${k}</button>`).join('')}
     </div>
     <label>날짜 <span class="muted">(카드는 결제일이 아닌 사용일로 적으세요)</span></label>
-    <input type="date" id="f_date" value="${dv}">
+    ${dateField('f_date',dv,'today')}
     <label>금액</label>
     <input type="number" id="f_amt" inputmode="numeric" placeholder="0">
     <label>분류</label>
@@ -601,7 +815,9 @@ function vAdd(y,m){
 function addTx(){
   const amt=+document.getElementById('f_amt').value;
   if(!amt){alert('금액을 입력하세요');return;}
-  const t={id:u(),date:document.getElementById('f_date').value,kind:addKind,
+  const fd=getDate('f_date');
+  if(!fd){alert('날짜를 모두 입력하세요 (년/월/일)');return;}
+  const t={id:u(),date:fd,kind:addKind,
     cat:document.getElementById('f_cat').value,amt:amt,
     memo:document.getElementById('f_memo').value};
   if(MODE==='corp'){
@@ -700,8 +916,8 @@ function addDebt(){
     cat:document.getElementById('d_cat').value,
     principal:P, bal:P,
     rate:+document.getElementById('d_rate').value||0,
-    start:document.getElementById('d_start').value||new Date().toISOString().slice(0,10),
-    end:document.getElementById('d_end').value||'',
+    start:getDate('d_start')||new Date().toISOString().slice(0,10),
+    end:getDate('d_end')||'',
     day:+document.getElementById('d_day').value||1,
     method:document.getElementById('d_method').value,
     alertDays:document.getElementById('d_alert').value,
@@ -750,10 +966,10 @@ function vRecur(){
       <div><label>분류</label><select id="d_cat">${CAT[MODE].부채.map(c=>`<option>${c}</option>`).join('')}</select></div>
       <div><label>대출 원금</label><input type="number" id="d_principal" inputmode="numeric" placeholder="120000000" oninput="calcPreview()"></div>
     </div>
-    <div class="grid2">
-      <div><label>대출 시작일</label><input type="date" id="d_start" oninput="calcPreview()"></div>
-      <div><label>만기일</label><input type="date" id="d_end" oninput="calcPreview()"></div>
-    </div>
+    <label>대출 시작일</label>
+    ${dateField('d_start','','today')}
+    <label>만기일</label>
+    ${dateField('d_end','')}
     <div class="grid2">
       <div><label>연이율 %</label><input type="number" id="d_rate" step="0.01" placeholder="4.2" oninput="calcPreview()"></div>
       <div><label>매월 납입일</label><input type="number" id="d_day" min="1" max="31" placeholder="15"></div>
@@ -816,8 +1032,8 @@ function calcPreview(){
   if(!box)return;
   const P=+(document.getElementById('d_principal')||{}).value||0;
   const rate=+(document.getElementById('d_rate')||{}).value||0;
-  const start=(document.getElementById('d_start')||{}).value;
-  const end=(document.getElementById('d_end')||{}).value;
+  const start=getDate('d_start');
+  const end=getDate('d_end');
   const method=(document.getElementById('d_method')||{}).value||'만기일시';
   if(!P){box.innerHTML='<div class="muted">원금·기간·이율을 입력하면 월 납입금액이 자동 계산됩니다.</div>';return;}
   const tmp={principal:P,rate,start,end,method,day:1};
@@ -913,6 +1129,225 @@ function addRecur(){
   S[MODE].recur.push({id:u(),kind:addKind,cat:document.getElementById('r_cat').value,amt:a,
     day:+document.getElementById('r_day').value||1,memo:document.getElementById('r_memo').value,on:true});
   save();render();
+}
+
+/* ── 분할매수 계산기 화면 ── */
+let SPLIT_SEL=null;
+function vSplit(){
+  const list=S.personal.splits||[];
+  if(!list.length) return `
+    <div class="card">
+      <h3>분할매수 계산기</h3>
+      <div class="empty">등록된 사이클이 없습니다</div>
+      <div class="muted">원금을 여러 회차로 나눠 매수하는 방식을 쓰실 때, 매일의 주문 가격과 수량을 계산해주는 도구입니다. 파라미터는 직접 정하시면 됩니다.</div>
+      <button class="btn" onclick="go('splitNew')">＋ 새 사이클 만들기</button>
+    </div>
+    ${splitDisclaimer()}`;
+
+  if(!SPLIT_SEL||!list.find(x=>x.id===SPLIT_SEL)) SPLIT_SEL=list[0].id;
+  const p=list.find(x=>x.id===SPLIT_SEL);
+  const b=splitBaseline(p), unit=splitUnitBuy(p);
+  const buys=splitBuyOrders(p), sells=splitSellOrders(p);
+  const a=+p.a||40;
+  const progress=Math.min(100,Math.round(p.turn/a*100));
+  const lastClose=(p.closes||[]).length?p.closes[p.closes.length-1]:0;
+  const farWarn = lastClose>0 && b.price>lastClose*1.2;
+
+  return `
+  <div class="card">
+    <h3>사이클 선택</h3>
+    <select onchange="SPLIT_SEL=this.value;render()">
+      ${list.map(x=>`<option value="${x.id}" ${x.id===p.id?'selected':''}>${x.name||'(이름없음)'} · ${x.a}분할</option>`).join('')}
+    </select>
+    <button class="btn sub" onclick="go('splitNew')">＋ 새 사이클</button>
+  </div>
+
+  <div class="card">
+    <h3>현재 상태 <span class="badge ${PHASE_CLS[b.phase]}" style="float:right">${PHASE_LABEL[b.phase]}</span></h3>
+    <div class="kv"><span class="lbl">회차</span><b>${p.turn.toFixed(3).replace(/\.?0+$/,'')} / ${a}</b></div>
+    <div class="kv"><span class="lbl">평단</span><b>${p.avg?p.avg.toFixed(2)+' $':'—'}</b></div>
+    <div class="kv"><span class="lbl">보유수량</span><b>${Math.floor(p.qty||0)} 주</b></div>
+    <div class="kv"><span class="lbl">잔금</span><b>${(+p.cash||0).toLocaleString('ko-KR',{maximumFractionDigits:2})} $</b></div>
+    <div class="kv"><span class="lbl">기준선 (${b.src})</span><b class="${b.pct>=0?'in':'out'}">${b.price?b.price.toFixed(2)+' $':'—'} (${b.pct>=0?'+':''}${b.pct.toFixed(2)}%)</b></div>
+    <div class="kv"><span class="lbl">1회 매수금</span><b>${unit.toLocaleString('ko-KR',{maximumFractionDigits:2})} $</b></div>
+    <div class="bar" style="margin-top:8px"><i style="width:${progress}%"></i></div>
+    <div class="muted" style="text-align:right;margin-top:3px">${progress}% 진행</div>
+    ${p.firstDay?`<div class="alert" style="margin-top:10px"><div class="t">소진 첫날</div><div class="d">이 설정에서는 첫날 매수를 걸지 않고 매도만 진행합니다.</div></div>`:''}
+    ${farWarn?`<div class="alert" style="margin-top:10px"><div class="t">기준선이 최근 종가보다 20% 이상 높습니다</div><div class="d">증권사에서 주문이 거부될 수 있습니다. 실제 주문 가능 범위를 확인하세요.</div></div>`:''}
+  </div>
+
+  <div class="card">
+    <h3>매수 주문 계산 결과</h3>
+    ${buys.length?`<table class="ordTbl">
+      <thead><tr><th>구분</th><th>가격</th><th>수량</th><th>금액</th></tr></thead>
+      <tbody>${buys.map(o=>`<tr class="${o.key?'key':''}">
+        <td>${o.label}</td><td>${o.px.toFixed(2)}</td><td>${o.qty}</td>
+        <td>${(o.px*o.qty).toFixed(0)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td>합계</td><td></td><td>${buys.reduce((s,o)=>s+o.qty,0)}</td>
+        <td>${buys.reduce((s,o)=>s+o.px*o.qty,0).toFixed(0)}</td></tr></tfoot>
+    </table>
+    <div class="muted" style="margin-top:8px">기준선 매수가는 매도와 동시 체결되지 않도록 0.01 낮춰 계산했습니다.</div>`
+    :'<div class="empty">이 상태에서는 매수 주문이 산출되지 않습니다</div>'}
+  </div>
+
+  <div class="card">
+    <h3>매도 주문 계산 결과</h3>
+    ${sells.length?`<table class="ordTbl">
+      <thead><tr><th>구분</th><th>가격</th><th>수량</th><th>금액</th></tr></thead>
+      <tbody>${sells.map(o=>`<tr class="${o.key?'key':''}">
+        <td>${o.label}${o.note?' · '+o.note:''}</td>
+        <td>${o.px?o.px.toFixed(2):'종가'}</td><td>${o.qty}</td>
+        <td>${o.px?(o.px*o.qty).toFixed(0):'—'}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td>합계</td><td></td><td>${sells.reduce((s,o)=>s+o.qty,0)}</td><td></td></tr></tfoot>
+    </table>`:'<div class="empty">보유수량이 없습니다</div>'}
+  </div>
+
+  <div class="card">
+    <h3>체결 결과 반영</h3>
+    <div class="muted">어제 무엇이 체결됐는지 눌러주세요. 회차가 설정한 규칙대로 갱신됩니다.</div>
+    <div class="evtRow">
+      <button onclick="splitEvent('${p.id}','full')">1회분 전량 매수</button>
+      <button onclick="splitEvent('${p.id}','half')">절반만 매수</button>
+      <button onclick="splitEvent('${p.id}','part')">분할매도 체결</button>
+      <button onclick="splitEvent('${p.id}','target')">목표가 전량매도 (종료)</button>
+    </div>
+    <div class="hr"></div>
+    <label>평단 · 보유수량 · 잔금 직접 수정</label>
+    <div class="grid2">
+      <div><label>평단 (\$)</label><input type="number" step="0.01" id="sp_avg" value="${p.avg||''}"></div>
+      <div><label>보유수량</label><input type="number" id="sp_qty" value="${Math.floor(p.qty||0)}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>잔금 (\$)</label><input type="number" step="0.01" id="sp_cash" value="${p.cash||''}"></div>
+      <div><label>회차</label><input type="number" step="0.00001" id="sp_turn" value="${p.turn||0}"></div>
+    </div>
+    <label>최근 종가 <span class="muted">(쉼표로 구분 · 소진구간 기준선 산정용)</span></label>
+    <input type="text" id="sp_closes" placeholder="45.1, 44.8, 43.9, 44.2, 43.5" value="${(p.closes||[]).join(', ')}">
+    <button class="btn" onclick="splitSaveState('${p.id}')">상태 저장</button>
+  </div>
+
+  <div class="card">
+    <h3>파라미터 설정</h3>
+    <div class="grid2">
+      <div><label>종목명</label><input type="text" id="sc_name" value="${p.name||''}"></div>
+      <div><label>원금 (\$)</label><input type="number" id="sc_principal" value="${p.principal||''}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>분할수</label><input type="number" id="sc_a" value="${p.a}"></div>
+      <div><label>목표수익률 % <span class="muted">(기준선 계수)</span></label><input type="number" step="0.1" id="sc_M" value="${p.M}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>목표가 매도 %</label><input type="number" step="0.1" id="sc_sellTarget" value="${p.sellTarget}"></div>
+      <div><label>분할매도 비율 %</label><input type="number" id="sc_partRatio" value="${p.partRatio}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>전반부 기준선 배분 %</label><input type="number" id="sc_frontRatio" value="${p.frontRatio}"></div>
+      <div><label>사다리 단계</label><input type="number" id="sc_ladderSteps" value="${p.ladderSteps}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>사다리 하락률 %</label><input type="number" step="0.1" id="sc_ladderDrop" value="${p.ladderDrop}"></div>
+      <div><label>소진구간 기준선</label>
+        <select id="sc_useSMA">
+          <option value="1" ${p.useSMA?'selected':''}>최근 종가평균</option>
+          <option value="0" ${!p.useSMA?'selected':''}>평단 기준 유지</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn sub" onclick="splitSaveCfg('${p.id}')">설정 저장</button>
+    <button class="btn sub" onclick="splitEvent('${p.id}','reset')">사이클 초기화 (원금으로 되돌리기)</button>
+    <button class="btn sub danger" onclick="splitDel('${p.id}')">이 사이클 삭제</button>
+  </div>
+
+  <div class="card">
+    <h3>계산식 참고</h3>
+    <div class="muted">
+      기준선% = 목표수익률 × (1 − 2×회차 ÷ 분할수)<br>
+      기준선가 = 평단 × (1 + 기준선%)<br>
+      1회 매수금 = 잔금 ÷ (분할수 − 회차)<br>
+      소진구간 1회 매수금 = 잔금 ÷ 4<br>
+      전반부·후반부 경계 = 분할수 ÷ 2<br>
+      소진구간 진입 = 회차 ≥ 분할수 − 1
+    </div>
+  </div>
+  ${splitDisclaimer()}`;
+}
+
+function splitDisclaimer(){
+  return `<div class="disc">
+    이 화면은 <b>입력하신 파라미터로 산술 계산만 수행하는 계산기</b>입니다.
+    특정 매매 기법이나 종목을 권유하지 않으며, 매매 지시나 투자 자문이 아닙니다.
+    표시된 값은 사용자가 스스로 정한 규칙에 따른 계산 결과이며, 실제 주문·투자 판단과 그 결과에 대한 책임은 전적으로 사용자에게 있습니다.
+    레버리지 상품은 원금 손실 위험이 큽니다.
+  </div>`;
+}
+
+function vSplitNew(){
+  const d=splitDefaults();
+  return `<div class="card">
+    <h3>새 사이클 만들기</h3>
+    <div class="grid2">
+      <div><label>종목명</label><input type="text" id="nc_name" placeholder="예: 종목A"></div>
+      <div><label>원금 (\$)</label><input type="number" id="nc_principal" placeholder="20000"></div>
+    </div>
+    <div class="grid2">
+      <div><label>분할수</label><input type="number" id="nc_a" value="${d.a}"></div>
+      <div><label>목표수익률 %</label><input type="number" step="0.1" id="nc_M" value="${d.M}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>목표가 매도 %</label><input type="number" step="0.1" id="nc_sellTarget" value="${d.sellTarget}"></div>
+      <div><label>분할매도 비율 %</label><input type="number" id="nc_partRatio" value="${d.partRatio}"></div>
+    </div>
+    <div class="grid2">
+      <div><label>전반부 기준선 배분 %</label><input type="number" id="nc_frontRatio" value="${d.frontRatio}"></div>
+      <div><label>사다리 단계</label><input type="number" id="nc_ladderSteps" value="${d.ladderSteps}"></div>
+    </div>
+    <label>사다리 하락률 %</label>
+    <input type="number" step="0.1" id="nc_ladderDrop" value="${d.ladderDrop}">
+    <button class="btn" onclick="splitAdd()">사이클 등록</button>
+    <button class="btn sub" onclick="go('split')">취소</button>
+    <div class="muted" style="margin-top:8px">모든 값은 나중에 바꿀 수 있습니다. 분할수가 클수록 1회 매수금이 작아집니다.</div>
+  </div>
+  ${splitDisclaimer()}`;
+}
+
+function splitAdd(){
+  const g=id=>(document.getElementById(id)||{}).value;
+  const name=g('nc_name'), principal=+g('nc_principal')||0;
+  if(!name){alert('종목명을 입력하세요');return;}
+  if(!principal){alert('원금을 입력하세요');return;}
+  const p=splitDefaults();
+  p.name=name; p.principal=principal; p.cash=principal;
+  p.a=+g('nc_a')||40; p.M=+g('nc_M')||10;
+  p.sellTarget=+g('nc_sellTarget')||10; p.partRatio=+g('nc_partRatio')||25;
+  p.frontRatio=+g('nc_frontRatio')||50;
+  p.ladderSteps=+g('nc_ladderSteps')||0; p.ladderDrop=+g('nc_ladderDrop')||0;
+  S.personal.splits=S.personal.splits||[];
+  S.personal.splits.push(p);
+  SPLIT_SEL=p.id; save(); TAB='split'; render();
+}
+function splitSaveState(id){
+  const p=(S.personal.splits||[]).find(x=>x.id===id); if(!p)return;
+  const g=k=>(document.getElementById(k)||{}).value;
+  p.avg=+g('sp_avg')||0; p.qty=+g('sp_qty')||0;
+  p.cash=+g('sp_cash')||0; p.turn=+g('sp_turn')||0;
+  p.closes=(g('sp_closes')||'').split(',').map(s=>+s.trim()).filter(n=>n>0);
+  save(); render();
+}
+function splitSaveCfg(id){
+  const p=(S.personal.splits||[]).find(x=>x.id===id); if(!p)return;
+  const g=k=>(document.getElementById(k)||{}).value;
+  p.name=g('sc_name')||p.name; p.principal=+g('sc_principal')||0;
+  p.a=+g('sc_a')||40; p.M=+g('sc_M')||0;
+  p.sellTarget=+g('sc_sellTarget')||0; p.partRatio=+g('sc_partRatio')||25;
+  p.frontRatio=+g('sc_frontRatio')||50;
+  p.ladderSteps=+g('sc_ladderSteps')||0; p.ladderDrop=+g('sc_ladderDrop')||0;
+  p.useSMA = g('sc_useSMA')==='1';
+  save(); render();
+}
+function splitDel(id){
+  if(!confirm('이 사이클을 삭제할까요?'))return;
+  S.personal.splits=(S.personal.splits||[]).filter(x=>x.id!==id);
+  SPLIT_SEL=null; save(); render();
 }
 
 /* ── 증빙·세무 (법인) ── */
