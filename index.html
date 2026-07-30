@@ -163,10 +163,13 @@ body.corp nav.bn button.on{color:var(--corp)}
   display:inline-block;color:#fff;margin-bottom:6px}
 .gTitle.buy{background:var(--in)}
 .gTitle.sell{background:var(--debt)}
-.gRow{display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:9px;
-  margin-bottom:5px;background:#fafaf9;border-left:4px solid var(--line)}
+.gRow{padding:8px 11px;margin-bottom:5px;background:#fafaf9;border-left:4px solid var(--line)}
 .gRow.buy{border-left-color:var(--in)}
 .gRow.sell{border-left-color:var(--debt)}
+.gTag{font-size:11.5px;color:var(--sub);font-weight:700;margin-bottom:1px}
+.gOrd{display:inline-block;background:var(--ink);color:#fff;font-size:10.5px;font-weight:800;
+  padding:1px 6px;border-radius:4px;letter-spacing:.2px;margin-right:1px}
+.gBody{display:flex;align-items:center;gap:8px}
 .gPx{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;min-width:88px}
 .gQty{font-size:15px;font-weight:700;color:var(--ink)}
 .gAmt{margin-left:auto;font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
@@ -353,8 +356,24 @@ function splitDefaults(){
     buyFee:0.25,          // 매수 수수료 %
     sellFee:0.25,         // 매도 수수료 %
     sellTax:0.00206,      // 매도 제세금 %
-    feeOn:true            // 수수료 보정 사용
+    feeOn:true,           // 수수료 보정 사용
+    // 주문 방식 (증권사에 실제로 걸 주문 종류)
+    ordBaseBuy:'LOC',     // 기준선 매수
+    ordAvgBuy:'LOC',      // 평단 매수
+    ordLadder:'지정가',    // 추가매수 사다리
+    ordBaseSell:'LOC',    // 기준선 매도
+    ordTargetSell:'지정가' // 목표가 매도
   };
+}
+const ORD_TYPES=['LOC','지정가','MOC','시장가'];
+
+// 평단 대비 몇 %인지 라벨로 만든다
+function splitBasisLabel(p,px,isAvg){
+  if(isAvg) return '평단';
+  const avg=+p.avg||0;
+  if(!avg||!px) return '—';
+  const d=(px/avg-1)*100;
+  return (d>=0?'+':'')+d.toFixed(2)+'%';
 }
 
 /* ── 수수료·제세금 보정 ──
@@ -413,13 +432,17 @@ function splitBuyOrders(p){
   const out=[];
   if(p.firstDay && b.phase==='exhaust') return out;   // 소진 첫날은 매수 없음
   const buyPx = Math.max(0.01, b.price - 0.01);       // 매도와 겹침 방지
+  const oBase=p.ordBaseBuy||'LOC', oAvg=p.ordAvgBuy||'LOC', oLad=p.ordLadder||'지정가';
   if(b.phase==='front'){
     const r=(+p.frontRatio||50)/100;
     const a1=unit*r, a2=unit*(1-r);
-    if(buyPx>0) out.push({label:'기준선', px:buyPx, qty:qOf(a1,buyPx), key:true});
-    if(p.avg>0) out.push({label:'평단', px:p.avg, qty:qOf(a2,p.avg), key:true});
+    if(buyPx>0) out.push({label:'기준선', px:buyPx, qty:qOf(a1,buyPx), key:true,
+      ord:oBase, basis:splitBasisLabel(p,b.price)});
+    if(p.avg>0) out.push({label:'평단', px:p.avg, qty:qOf(a2,p.avg), key:true,
+      ord:oAvg, basis:'평단'});
   }else{
-    if(buyPx>0) out.push({label:'기준선', px:buyPx, qty:qOf(unit,buyPx), key:true});
+    if(buyPx>0) out.push({label:'기준선', px:buyPx, qty:qOf(unit,buyPx), key:true,
+      ord:oBase, basis:splitBasisLabel(p,b.price)});
   }
   // 추가매수 사다리
   const base = out.length ? out[out.length-1].px : buyPx;
@@ -428,7 +451,8 @@ function splitBuyOrders(p){
   for(let i=0;i<(+p.ladderSteps||0);i++){
     px = px*(1-drop);
     if(px<=0.01)break;
-    out.push({label:'추가 '+(i+1), px:Math.round(px*100)/100, qty:1});
+    px = Math.round(px*100)/100;
+    out.push({label:'추가 '+(i+1), px, qty:1, ord:oLad, basis:splitBasisLabel(p,px)});
   }
   return out;
 }
@@ -443,21 +467,26 @@ function splitSellOrders(p){
   // 목표수익률을 실수령 기준으로 맞추기 위해 매도가에 왕복계수를 곱한다
   const adj = px => Math.round(px*F.rt*100)/100;
   const tgt = adj(p.avg*(1+(+p.sellTarget||0)/100));
+  const oBase=p.ordBaseSell||'LOC', oTgt=p.ordTargetSell||'지정가';
+  const tgtRow = n => ({label:'목표가', px:tgt, qty:n, ord:oTgt,
+    basis:(( +p.sellTarget||0)>=0?'+':'')+(+p.sellTarget||0).toFixed(2)+'%'});
   if(b.phase==='exhaust'){
     const n=Math.max(2,Math.round((+p.a||40)/2));
     const part=Math.floor(qty/n);
     if(p.firstDay){
-      out.push({label:'전량기준 분할 (종가매도)', px:null, qty:part, key:true, note:'MOC'});
+      out.push({label:'분할매도', px:null, qty:part, key:true, ord:'MOC', basis:'종가'});
     }else{
-      out.push({label:'기준선', px:adj(b.price), qty:part, key:true});
+      out.push({label:'분할매도', px:adj(b.price), qty:part, key:true,
+        ord:oBase, basis:splitBasisLabel(p,b.price)});
     }
     const rest=qty-part;
-    if(rest>0) out.push({label:'목표가', px:tgt, qty:rest});
+    if(rest>0) out.push(tgtRow(rest));
   }else{
     const part=Math.floor(qty*(+p.partRatio||25)/100);
-    if(part>0) out.push({label:'기준선', px:adj(b.price), qty:part, key:true});
+    if(part>0) out.push({label:'분할매도', px:adj(b.price), qty:part, key:true,
+      ord:oBase, basis:splitBasisLabel(p,b.price)});
     const rest=qty-part;
-    if(rest>0) out.push({label:'목표가', px:tgt, qty:rest});
+    if(rest>0) out.push(tgtRow(rest));
   }
   return out;
 }
@@ -1225,9 +1254,12 @@ function splitGuide(p){
   const lastClose=(p.closes||[]).length?p.closes[p.closes.length-1]:0;
   const farWarn = lastClose>0 && b.price>lastClose*1.2;
   const line=(o,cls)=>`<div class="gRow ${cls}">
-      <span class="gPx">$${o.px?o.px.toFixed(2):'종가'}</span>
-      <span class="gQty">${o.qty}주</span>
-      <span class="gAmt">${o.px?'$'+(o.px*o.qty).toFixed(0):'—'}</span>
+      <div class="gTag"><span class="gOrd">${o.ord||''}</span>${o.basis?' · '+o.basis:''}</div>
+      <div class="gBody">
+        <span class="gPx">${o.px?'$'+o.px.toFixed(2):'종가'}</span>
+        <span class="gQty">${o.qty}주</span>
+        <span class="gAmt">${o.px?'$'+(o.px*o.qty).toFixed(0):'—'}</span>
+      </div>
     </div>`;
 
   return `
@@ -1246,7 +1278,7 @@ function splitGuide(p){
       <div class="gTitle buy">매수 걸 것</div>
       ${key.length?key.map(o=>line(o,'buy')).join('')
         :'<div class="gNone">오늘 매수 주문 없음</div>'}
-      ${lad.length?`<div class="gLad">더 떨어질 때 대비 (각 1주): ${lad.map(o=>'$'+o.px.toFixed(2)).join(' · ')}</div>`:''}
+      ${lad.length?`<div class="gLad">${lad[0].ord} 추가매수 · 각 1주 · ${lad.map(o=>'$'+o.px.toFixed(2)+' ('+o.basis+')').join(' / ')}</div>`:''}
     </div>
 
     <div class="gBlock">
@@ -1272,6 +1304,10 @@ function splitGuide(p){
   </div>`;
 }
 function splitOpen(id){ SPLIT_SEL=id; TAB='splitDetail'; render(); }
+function ordSel(id,val){
+  return `<select id="${id}">${ORD_TYPES.map(t=>
+    `<option value="${t}" ${t===val?'selected':''}>${t}</option>`).join('')}</select>`;
+}
 
 function vSplitDetail(){
   const list=S.personal.splits||[];
@@ -1314,11 +1350,12 @@ function vSplitDetail(){
   <div class="card">
     <h3>매수 주문 계산 결과</h3>
     ${buys.length?`<table class="ordTbl">
-      <thead><tr><th>구분</th><th>가격</th><th>수량</th><th>금액</th></tr></thead>
+      <thead><tr><th>구분</th><th>방식</th><th>가격</th><th>수량</th><th>금액</th></tr></thead>
       <tbody>${buys.map(o=>`<tr class="${o.key?'key':''}">
-        <td>${o.label}</td><td>${o.px.toFixed(2)}</td><td>${o.qty}</td>
+        <td>${o.label}</td><td style="text-align:left;font-size:11px">${o.ord}<br>${o.basis}</td>
+        <td>${o.px.toFixed(2)}</td><td>${o.qty}</td>
         <td>${(o.px*o.qty).toFixed(0)}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><td>합계</td><td></td><td>${buys.reduce((s,o)=>s+o.qty,0)}</td>
+      <tfoot><tr><td>합계</td><td></td><td></td><td>${buys.reduce((s,o)=>s+o.qty,0)}</td>
         <td>${buys.reduce((s,o)=>s+o.px*o.qty,0).toFixed(0)}</td></tr></tfoot>
     </table>
     <div class="muted" style="margin-top:8px">기준선 매수가는 매도와 동시 체결되지 않도록 0.01 낮춰 계산했습니다.
@@ -1330,12 +1367,12 @@ function vSplitDetail(){
   <div class="card">
     <h3>매도 주문 계산 결과</h3>
     ${sells.length?`<table class="ordTbl">
-      <thead><tr><th>구분</th><th>가격</th><th>수량</th><th>금액</th></tr></thead>
+      <thead><tr><th>구분</th><th>방식</th><th>가격</th><th>수량</th><th>금액</th></tr></thead>
       <tbody>${sells.map(o=>`<tr class="${o.key?'key':''}">
-        <td>${o.label}${o.note?' · '+o.note:''}</td>
+        <td>${o.label}</td><td style="text-align:left;font-size:11px">${o.ord}<br>${o.basis}</td>
         <td>${o.px?o.px.toFixed(2):'종가'}</td><td>${o.qty}</td>
         <td>${o.px?(o.px*o.qty).toFixed(0):'—'}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><td>합계</td><td></td><td>${sells.reduce((s,o)=>s+o.qty,0)}</td><td></td></tr></tfoot>
+      <tfoot><tr><td>합계</td><td></td><td></td><td>${sells.reduce((s,o)=>s+o.qty,0)}</td><td></td></tr></tfoot>
     </table>
     ${F.on?`<div class="muted" style="margin-top:8px">매도가에 <b>왕복 수수료 ${((F.rt-1)*100).toFixed(4)}%</b>를 더했습니다.
       따라서 표의 가격에 팔면 수수료·제세금을 뺀 <b>실수령 기준</b>으로 설정한 수익률이 나옵니다.<br>
@@ -1395,6 +1432,17 @@ function vSplitDetail(){
         </select>
       </div>
     </div>
+    <div class="hr"></div>
+    <label>주문 방식 <span class="muted">(가이드 화면에 표시됩니다)</span></label>
+    <div class="grid2">
+      <div><label>기준선 매수</label>${ordSel('sc_ordBaseBuy',p.ordBaseBuy||'LOC')}</div>
+      <div><label>평단 매수</label>${ordSel('sc_ordAvgBuy',p.ordAvgBuy||'LOC')}</div>
+    </div>
+    <div class="grid2">
+      <div><label>분할매도</label>${ordSel('sc_ordBaseSell',p.ordBaseSell||'LOC')}</div>
+      <div><label>목표가 매도</label>${ordSel('sc_ordTargetSell',p.ordTargetSell||'지정가')}</div>
+    </div>
+    <label>추가매수 사다리</label>${ordSel('sc_ordLadder',p.ordLadder||'지정가')}
     <div class="hr"></div>
     <label>수수료 · 제세금 <span class="muted">(증권사 조건에 맞게 입력)</span></label>
     <select id="sc_feeOn" style="margin-bottom:6px">
@@ -1535,6 +1583,9 @@ function splitSaveCfg(id){
   p.buyFee = +g('sc_buyFee')||0;
   p.sellFee= +g('sc_sellFee')||0;
   p.sellTax= +g('sc_sellTax')||0;
+  ['ordBaseBuy','ordAvgBuy','ordBaseSell','ordTargetSell','ordLadder'].forEach(k=>{
+    const v=g('sc_'+k); if(v) p[k]=v;
+  });
   save(); render();
 }
 function splitDel(id){
