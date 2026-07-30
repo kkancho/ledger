@@ -473,7 +473,7 @@ function splitDefaults(){
     // 주문 방식 (증권사에 실제로 걸 주문 종류)
     ordBaseBuy:'LOC',     // 기준선 매수
     ordAvgBuy:'LOC',      // 평단 매수
-    ordLadder:'지정가',    // 추가매수 사다리
+    ordLadder:'LOC',      // 추가매수 사다리 (종가 기준으로 걸어야 예산이 맞음)
     ordBaseSell:'LOC',    // 기준선 매도
     ordTargetSell:'지정가' // 목표가 매도
   };
@@ -545,7 +545,7 @@ function splitBuyOrders(p){
   const out=[];
   if(p.firstDay && b.phase==='exhaust') return out;   // 소진 첫날은 매수 없음
   const buyPx = Math.max(0.01, b.price - 0.01);       // 매도와 겹침 방지
-  const oBase=p.ordBaseBuy||'LOC', oAvg=p.ordAvgBuy||'LOC', oLad=p.ordLadder||'지정가';
+  const oBase=p.ordBaseBuy||'LOC', oAvg=p.ordAvgBuy||'LOC', oLad=p.ordLadder||'LOC';
   if(b.phase==='front'){
     const r=(+p.frontRatio||50)/100;
     const a1=unit*r, a2=unit*(1-r);
@@ -1865,7 +1865,8 @@ function vSplitDetail(){
       <div><label>분할매도</label>${ordSel('sc_ordBaseSell',p.ordBaseSell||'LOC')}</div>
       <div><label>목표가 매도</label>${ordSel('sc_ordTargetSell',p.ordTargetSell||'지정가')}</div>
     </div>
-    <label>추가매수 사다리</label>${ordSel('sc_ordLadder',p.ordLadder||'지정가')}
+    <label>추가매수 사다리</label>${ordSel('sc_ordLadder',p.ordLadder||'LOC')}
+    <div class="muted" style="margin-top:6px">LOC는 <b>종가에만</b> 체결됩니다. 사다리를 LOC로 걸면 종가가 아래 단계까지 내려간 날에만, 그 종가 하나로 여러 단계가 함께 체결되어 <b>예산이 초과되지 않습니다.</b> 지정가로 걸면 장중 순간 하락(꼬리)에 걸려 종가가 회복된 날에도 매수됩니다.</div>
     <div class="hr"></div>
     <label>수수료 · 제세금 <span class="muted">(증권사 조건에 맞게 입력)</span></label>
     <select id="sc_feeOn" style="margin-bottom:6px">
