@@ -269,7 +269,42 @@ const SUB={
       '미분류':[]
     }
   },
-  corp:{지출:{},수입:{}}
+  corp:{
+    지출:{
+      '인적비용':['급여','상여금','제수당','잡급','퇴직급여','퇴직연금부담금','복리후생비',
+                 '국민연금','건강보험료','고용보험료','산재보험료','교육훈련비','기타'],
+      '세금과공과':['세금과공과금','재산세','종합부동산세','자동차세','등록면허세','인지세',
+                   '주민세','부담금','협회비·조합비','기타'],
+      '임차·시설':['임차료','관리비','수도광열비','전력비','보험료','수선비',
+                  '경비용역비','청소용역비','시설장치비','기타'],
+      '영업활동':['기업업무추진비','광고선전비','판매촉진비','견본비','판매수수료',
+                 '판매장려금','포장비','운반비','보관료','하자보수비','기타'],
+      '이동·차량':['여비교통비','차량유지비','차량감가상각비','차량리스료','차량보험료','기타'],
+      '외부용역':['지급수수료','세무·법무 자문료','감사보수','중개수수료','감정평가수수료',
+                 '법무사수수료','금융수수료','전산유지보수료','소프트웨어사용료','외주가공비','기타'],
+      '사무·운영':['소모품비','도서인쇄비','통신비','회의비','잡비','기타'],
+      '연구개발':['경상연구개발비','시험비','출원·등록료','무형자산상각비','기타'],
+      '비현금비용':['감가상각비','대손상각비','대손충당금전입액','재고자산평가손실','기타'],
+      '매출원가':['부동산 매입원가','취득세·등록면허세','인지세·채권매입비','중개수수료',
+                 '법무사수수료','감정평가수수료','명도비용','철거·설계·감리비',
+                 '공사·인테리어비','건설자금이자','분양수수료','기타'],
+      '임대원가':['건물감가상각비','재산세·종부세','건물보험료','관리용역비','시설유지비',
+                 '공용수도광열비','수선유지비','제세공과','기타'],
+      '용역원가':['노무비','외주용역비','서버·클라우드비용','소프트웨어라이선스',
+                 '앱스토어 수수료','기타'],
+      '영업외비용':['이자비용','외화환산손실','외환차손','매출채권처분손실','파생상품거래손실',
+                  '유형자산처분손실','투자자산처분손실','재고자산감모손실','기타의대손상각비',
+                  '기부금','잡손실','재해손실','기타'],
+      '손금불산입':['법인세·지방소득세','벌금·과태료·가산세','업무무관비용','대표 개인비용',
+                  '한도초과분','채권자불분명 사채이자','기타'],
+      '미분류':[]
+    },
+    수입:{
+      '매출':['부동산 매출','임대수익','관리비수익','용역수익','소프트웨어 매출','기타'],
+      '영업외수익':['이자수익','배당금수익','외환차익','유형자산처분이익','잡이익','기타'],
+      '미분류':[]
+    }
+  }
 };
 // 소분류를 추가할 수 없는 대분류
 const NO_ADD=['미분류'];
@@ -292,17 +327,21 @@ const CAT={
     부채:['주택 융자','가계 대출','신용카드','개인 차용','기타부채']
   },
   corp:{
-    수입:['부동산 매출','임대수익','용역수익','이자수익','잡이익'],
-    지출:['부동산 매입원가','취득세·등록세','중개수수료','법무사비용','급여','임차료','지급수수료','세금과공과','접대비','광고선전비','이자비용','잡손실','기타비용'],
-    자산:['현금·예금','재고자산(부동산)','유형자산','보증금','가지급금','기타자산'],
+    수입:['매출','영업외수익','미분류'],
+    지출:['인적비용','세금과공과','임차·시설','영업활동','이동·차량','외부용역','사무·운영',
+          '연구개발','비현금비용','매출원가','임대원가','용역원가','영업외비용','손금불산입','미분류'],
+    자산:['현금·예금','재고자산(부동산)','유형자산','무형자산','보증금','가지급금','기타자산'],
     부채:['차입금','미지급금','예수금','가수금','기타부채']
   }
 };
-// 법인 손익 분류
-const CORP_REV_OP=['부동산 매출','임대수익','용역수익'];
-const CORP_REV_NONOP=['이자수익','잡이익'];
-const CORP_COGS=['부동산 매입원가','취득세·등록세','중개수수료','법무사비용'];
-const CORP_EXP_NONOP=['이자비용','잡손실'];
+/* ── 법인 손익 분류 (뒤쪽은 구버전 데이터 호환) ── */
+const CORP_REV_OP=['매출','부동산 매출','임대수익','용역수익'];
+const CORP_REV_NONOP=['영업외수익','이자수익','잡이익'];
+const CORP_COGS=['매출원가','임대원가','용역원가',
+                 '부동산 매입원가','취득세·등록세','중개수수료','법무사비용'];
+const CORP_EXP_NONOP=['영업외비용','손금불산입','이자비용','잡손실'];
+// 세무조정으로 되돌려야 하는 분류 (비용으로 기록되지만 손금 인정 안 됨)
+const CORP_NONDEDUCT=['손금불산입'];
 const EVIDENCE=['세금계산서','계산서','현금영수증','사업용카드','간이영수증','증빙없음'];
 const EV_OK=['세금계산서','계산서','현금영수증','사업용카드'];
 
@@ -770,15 +809,24 @@ function pnl(mode,y,m){
   const tx=monthTx(mode,y,m);
   const inc={},exp={};
   let inTot=0,outTot=0,passive=0;
-  let repayTot=0;
+  let repayTot=0, nonDeduct=0, noEvidence=0;
+  const subExp={};
   tx.forEach(t=>{
     // 원금상환은 비용이 아니라 부채 감소 → 손익계산서에서 제외하고 따로 집계
     if(t.bsOnly){ repayTot+=t.amt; return; }
     if(t.kind==='수입'){inc[t.cat]=(inc[t.cat]||0)+t.amt;inTot+=t.amt;
       if(PASSIVE.includes(t.cat))passive+=t.amt;}
-    else if(t.kind==='지출'){exp[t.cat]=(exp[t.cat]||0)+t.amt;outTot+=t.amt;}
+    else if(t.kind==='지출'){
+      exp[t.cat]=(exp[t.cat]||0)+t.amt; outTot+=t.amt;
+      if(t.sub){const k=t.cat+' › '+t.sub; subExp[k]=(subExp[k]||0)+t.amt;}
+      if(mode==='corp'){
+        if(CORP_NONDEDUCT.includes(t.cat)) nonDeduct+=t.amt;
+        if(t.ev&&!t.evOk) noEvidence+=t.amt;
+      }
+    }
   });
-  return{inc,exp,inTot,outTot,passive,repayTot,net:inTot-outTot,cash:inTot-outTot-repayTot,tx};
+  return{inc,exp,subExp,inTot,outTot,passive,repayTot,nonDeduct,noEvidence,
+    net:inTot-outTot,cash:inTot-outTot-repayTot,tx};
 }
 
 function bs(mode){
@@ -915,7 +963,19 @@ function dashCorp(y,m){
     <div class="row"><span class="lbl">(+) 영업외수익</span><span class="val in">${won(C.revNon)}</span></div>
     <div class="row"><span class="lbl">(−) 영업외비용</span><span class="val out">${won(C.expNon)}</span></div>
     <div class="row total"><span class="lbl">당기순이익</span><span class="val ${C.net>=0?'in':'out'}">${won(C.net)}</span></div>
+    ${C.nonDeduct>0?`
+    <div class="hr"></div>
+    <div class="row"><span class="lbl">손금불산입 예상액</span><span class="val out">${won(C.nonDeduct)}</span></div>
+    <div class="row total"><span class="lbl">세무상 소득 (추정)</span><span class="val">${won(C.net+C.nonDeduct)}</span></div>
+    <div class="muted" style="margin-top:6px;color:var(--warn)">손금불산입으로 분류한 지출은 회계상 비용이지만 법인세 계산에서는 다시 더해집니다. 세무조정 대상입니다.</div>`:''}
   </div>
+
+  ${Object.keys(C.subExp||{}).length?`<div class="card">
+    <h3>비용 상세 <span class="muted">(계정과목별)</span></h3>
+    ${Object.entries(C.subExp).sort((a,b)=>b[1]-a[1]).map(([k,v])=>
+      `<div class="row"><span class="lbl">${k}</span><span class="val out">${won(v)}</span></div>`).join('')}
+    <div class="muted" style="margin-top:8px">세무사에게 전달할 때 이 목록이 그대로 계정과목 명세가 됩니다.</div>
+  </div>`:''}
 
   <div class="card">
     <h3>대차대조표</h3>
