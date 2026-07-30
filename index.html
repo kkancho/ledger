@@ -56,7 +56,7 @@ main{padding:14px}
 .muted{color:var(--sub);font-size:12px}
 .empty{text-align:center;color:var(--sub);font-size:13px;padding:22px 0}
 
-/* ── 부자아빠 현금흐름 다이어그램 ── */
+/* ── 현금흐름 다이어그램 ── */
 .cf{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
 .cfTitle{font-size:13px;font-weight:800;color:var(--sub);margin-bottom:12px}
 .cfBox{border:2px solid var(--ink);border-radius:10px;overflow:hidden;margin-bottom:0}
@@ -158,7 +158,7 @@ function save(){
 }
 
 /* ═══════════════ 카테고리 정의 ═══════════════ */
-// 부자아빠 현금흐름 기준: 불로소득 = 자산이 만들어내는 수입
+// 불로소득 = 자산이 스스로 만들어내는 수입
 const PASSIVE=['임대료 수입','배당금','이자','로열티'];
 const CAT={
   personal:{
@@ -257,7 +257,7 @@ function sample(){
 }
 function u(){return Math.random().toString(36).slice(2,10)}
 
-let S=load()||sample();
+let S=load()||blank();
 let MODE='personal';
 let TAB='dash';
 let CUR=new Date();
@@ -271,15 +271,81 @@ const wonS=n=>{const a=Math.abs(n);
 const ym=dt=>`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`;
 const daysIn=(y,m)=>new Date(y,m,0).getDate();
 
-// 대출 월 이자 / 상환 계산
-function loanMonthly(dbt){
-  const r=(dbt.rate||0)/100/12;
-  if(dbt.method==='원리금균등'&&dbt.pay>0){
-    const int=dbt.bal*r;
-    return{int:int, principal:Math.max(0,dbt.pay-int), total:dbt.pay};
+/* ── 대출 계산 엔진 ── */
+// 시작일~만기일 사이 개월 수
+function monthsBetween(s,e){
+  if(!s||!e)return 0;
+  const a=new Date(s), b=new Date(e);
+  let n=(b.getFullYear()-a.getFullYear())*12+(b.getMonth()-a.getMonth());
+  if(b.getDate()>=a.getDate())n+=0; else n-=0;
+  return Math.max(1,n);
+}
+// 대출 기본 정보: 총 회차, 월 납입액(원리금균등 기준)
+function loanInfo(d){
+  const P=d.principal||d.bal||0;
+  const r=(d.rate||0)/100/12;
+  const n=d.end&&d.start?monthsBetween(d.start,d.end):(d.months||0);
+  let monthly=0;
+  if(d.method==='원리금균등'&&n>0){
+    monthly = r===0 ? P/n : P*r*Math.pow(1+r,n)/(Math.pow(1+r,n)-1);
+  }else if(d.method==='원금균등'&&n>0){
+    monthly = P/n + P*r;            // 첫 회차 기준(이후 감소)
+  }else{
+    monthly = P*r;                   // 만기일시 = 매월 이자만
   }
-  const int=dbt.bal*r;
-  return{int:int, principal:0, total:int};
+  return {P,r,n,monthly};
+}
+// 특정 연월의 상환 상태 (k회차 기준)
+function loanAt(d,y,m){
+  const {P,r,n} = loanInfo(d);
+  if(!d.start)return{k:0,balance:d.bal||0,interest:(d.bal||0)*r,principal:0,payment:(d.bal||0)*r,done:false,before:false};
+  const s=new Date(d.start);
+  const k=(y-s.getFullYear())*12+(m-1-s.getMonth())+1;   // 1회차부터
+  if(k<1)return{k:0,balance:P,interest:0,principal:0,payment:0,done:false,before:true};
+  if(n>0&&k>n)return{k,balance:0,interest:0,principal:0,payment:0,done:true,before:false};
+
+  let balance,interest,principal,payment;
+  if(d.method==='원리금균등'&&n>0){
+    const {monthly}=loanInfo(d);
+    balance = r===0 ? P-(P/n)*(k-1)
+      : P*Math.pow(1+r,k-1) - monthly*(Math.pow(1+r,k-1)-1)/r;
+    balance=Math.max(0,balance);
+    interest=balance*r;
+    principal=Math.min(balance,monthly-interest);
+    payment=monthly;
+  }else if(d.method==='원금균등'&&n>0){
+    const pp=P/n;
+    balance=Math.max(0,P-pp*(k-1));
+    interest=balance*r;
+    principal=Math.min(balance,pp);
+    payment=principal+interest;
+  }else{
+    balance=P;
+    interest=P*r;
+    principal=(n>0&&k===n)?P:0;
+    payment=interest+principal;
+  }
+  return{k,balance,interest,principal,payment,done:false,before:false};
+}
+// 현재 잔액 (오늘 기준)
+function loanBalanceNow(d){
+  const t=new Date();
+  const st=loanAt(d,t.getFullYear(),t.getMonth()+1);
+  return st.done?0:Math.round(st.balance);
+}
+// 완제 예정일
+function loanEndLabel(d){
+  const {n}=loanInfo(d);
+  if(!d.start||!n)return '만기일시상환';
+  const s=new Date(d.start);
+  const e=new Date(s.getFullYear(),s.getMonth()+n,1);
+  return `${e.getFullYear()}.${String(e.getMonth()+1).padStart(2,'0')} 완제 예정 (총 ${n}회)`;
+}
+// 구버전 호환
+function loanMonthly(d){
+  const t=new Date();
+  const st=loanAt(d,t.getFullYear(),t.getMonth()+1);
+  return{int:st.interest, principal:st.principal, total:st.payment};
 }
 
 // 해당 월의 자동 반영 거래 (반복거래 + 대출이자) 생성
@@ -293,13 +359,12 @@ function autoTx(mode,y,m){
       kind:r.kind,cat:r.cat,amt:r.amt,memo:r.memo,auto:'반복',ev:r.ev||'',evOk:true});
   });
   (D.debts||[]).forEach(d=>{
-    if(d.bal<=0)return;
-    const mo=loanMonthly(d);
-    if(mo.total<=0)return;
+    const st=loanAt(d,y,m);
+    if(st.before||st.done||st.payment<=0)return;
     const day=Math.min(d.day||1,dim);
     out.push({id:'d_'+d.id,date:`${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`,
-      kind:'지출',cat:mode==='corp'?'이자비용':'대출 이자',amt:Math.round(mo.total),
-      memo:`${d.name} (이자 ${won(mo.int)}${mo.principal>0?' + 원금 '+won(mo.principal):''})`,
+      kind:'지출',cat:mode==='corp'?'이자비용':'대출 이자',amt:Math.round(st.payment),
+      memo:`${d.name} ${st.k}회차 (이자 ${won(st.interest)}${st.principal>0?' + 원금 '+won(st.principal):''})`,
       auto:'대출',ev:'',evOk:true});
   });
   return out;
@@ -326,7 +391,7 @@ function pnl(mode,y,m){
 function bs(mode){
   const D=S[mode];
   const aTot=(D.assets||[]).reduce((s,a)=>s+(a.val||0),0);
-  const dTot=(D.debts||[]).reduce((s,d)=>s+(d.bal||0),0);
+  const dTot=(D.debts||[]).reduce((s,d)=>s+loanBalanceNow(d),0);
   return{aTot,dTot,net:aTot-dTot,assets:D.assets||[],debts:D.debts||[]};
 }
 
@@ -388,7 +453,7 @@ function dashPersonal(y,m){
 
   return `
   <div class="cf">
-    <div class="cfTitle">현금흐름 (부자아빠 패턴)</div>
+    <div class="cfTitle">내 돈의 흐름</div>
     <div class="cfBox">
       <div class="cfHead">손익계산서</div>
       <div class="cfHalf">
@@ -598,31 +663,15 @@ function vBS(){
   <div class="card">
     <h3>부채 <span style="float:right" class="debt">${won(B.dTot)}</span></h3>
     ${B.debts.length?B.debts.map(d=>{
-      const mo=loanMonthly(d);
+      const st=loanAt(d,CUR.getFullYear(),CUR.getMonth()+1);
       return `<div class="item">
       <div class="ic" style="background:var(--debt)">負</div>
       <div class="mid"><div class="n">${d.name}</div>
-        <div class="s">${d.cat} · 연 ${d.rate}% · 매월 ${d.day}일 · 월 ${won(mo.total)}</div></div>
-      <div class="amt debt">${wonS(d.bal)}</div>
+        <div class="s">${d.cat} · 연 ${d.rate}% · 매월 ${d.day}일 · 월 ${won(st.payment)}</div></div>
+      <div class="amt debt">${wonS(loanBalanceNow(d))}</div>
       <button class="del" onclick="delItem('debts','${d.id}')">×</button></div>`;}).join('')
       :'<div class="empty">등록된 부채가 없습니다</div>'}
-    <div class="hr"></div>
-    <label>부채명 <span class="muted">(대출처)</span></label>
-    <input type="text" id="d_name" placeholder="예: 삼성생명 주택담보대출">
-    <div class="grid2">
-      <div><label>분류</label><select id="d_cat">${CAT[MODE].부채.map(c=>`<option>${c}</option>`).join('')}</select></div>
-      <div><label>잔액</label><input type="number" id="d_bal" inputmode="numeric" placeholder="0"></div>
-    </div>
-    <div class="grid2">
-      <div><label>연이율 %</label><input type="number" id="d_rate" step="0.01" placeholder="4.2"></div>
-      <div><label>매월 납입일</label><input type="number" id="d_day" min="1" max="31" placeholder="15"></div>
-    </div>
-    <div class="grid2">
-      <div><label>상환방식</label><select id="d_method"><option>이자만</option><option>원리금균등</option></select></div>
-      <div><label>월 납입액 <span class="muted">(원리금균등만)</span></label><input type="number" id="d_pay" placeholder="0"></div>
-    </div>
-    <button class="btn sub" onclick="addDebt()">＋ 부채 추가</button>
-    <div class="muted" style="margin-top:8px">한 번 등록하면 매월 이자가 자동으로 지출에 반영되고, 원금 상환분만큼 잔액이 줄어듭니다.</div>
+    <div class="muted" style="margin-top:10px">대출 등록과 상환 스케줄은 <b>반복·대출</b> 탭에서 관리합니다.</div>
   </div>
 
   <div class="card">
@@ -630,7 +679,9 @@ function vBS(){
     <button class="btn sub" onclick="exportJSON()">📥 백업 파일 내려받기</button>
     <button class="btn sub" onclick="document.getElementById('imp').click()">📤 백업 파일 불러오기</button>
     <input type="file" id="imp" accept=".json" style="display:none" onchange="importJSON(event)">
-    <button class="btn sub danger" onclick="resetAll()">전체 초기화</button>
+    <button class="btn sub" onclick="loadSample()">🧪 예시 데이터 불러오기</button>
+    <button class="btn sub danger" onclick="resetAll()">전체 초기화 (모든 데이터 삭제)</button>
+    <div class="muted" style="margin-top:8px">데이터는 이 기기에만 저장됩니다. 주 1회 백업을 권합니다.</div>
   </div>`;
 }
 function addAsset(){
@@ -641,11 +692,21 @@ function addAsset(){
 }
 function addDebt(){
   const n=document.getElementById('d_name').value;
-  if(!n){alert('부채명을 입력하세요');return;}
-  S[MODE].debts.push({id:u(),name:n,cat:document.getElementById('d_cat').value,
-    bal:+document.getElementById('d_bal').value,rate:+document.getElementById('d_rate').value||0,
-    day:+document.getElementById('d_day').value||1,method:document.getElementById('d_method').value,
-    pay:+document.getElementById('d_pay').value||0,start:new Date().toISOString().slice(0,10)});
+  if(!n){alert('대출명을 입력하세요');return;}
+  const P=+document.getElementById('d_principal').value||0;
+  if(!P){alert('대출 원금을 입력하세요');return;}
+  S[MODE].debts.push({
+    id:u(), name:n,
+    cat:document.getElementById('d_cat').value,
+    principal:P, bal:P,
+    rate:+document.getElementById('d_rate').value||0,
+    start:document.getElementById('d_start').value||new Date().toISOString().slice(0,10),
+    end:document.getElementById('d_end').value||'',
+    day:+document.getElementById('d_day').value||1,
+    method:document.getElementById('d_method').value,
+    alertDays:document.getElementById('d_alert').value,
+    lastNoti:''
+  });
   save();render();
 }
 function delItem(k,id){S[MODE][k]=S[MODE][k].filter(x=>x.id!==id);save();render();}
@@ -682,17 +743,168 @@ function vRecur(){
   </div>
 
   <div class="card">
+    <h3>대출 등록</h3>
+    <label>대출명 <span class="muted">(대출처)</span></label>
+    <input type="text" id="d_name" placeholder="예: 삼성생명 주택담보대출">
+    <div class="grid2">
+      <div><label>분류</label><select id="d_cat">${CAT[MODE].부채.map(c=>`<option>${c}</option>`).join('')}</select></div>
+      <div><label>대출 원금</label><input type="number" id="d_principal" inputmode="numeric" placeholder="120000000" oninput="calcPreview()"></div>
+    </div>
+    <div class="grid2">
+      <div><label>대출 시작일</label><input type="date" id="d_start" oninput="calcPreview()"></div>
+      <div><label>만기일</label><input type="date" id="d_end" oninput="calcPreview()"></div>
+    </div>
+    <div class="grid2">
+      <div><label>연이율 %</label><input type="number" id="d_rate" step="0.01" placeholder="4.2" oninput="calcPreview()"></div>
+      <div><label>매월 납입일</label><input type="number" id="d_day" min="1" max="31" placeholder="15"></div>
+    </div>
+    <label>상환방식</label>
+    <select id="d_method" onchange="calcPreview()">
+      <option value="만기일시">만기일시상환 (매월 이자만)</option>
+      <option value="원리금균등">원리금균등상환</option>
+      <option value="원금균등">원금균등상환</option>
+    </select>
+
+    <div id="calcBox" class="freedom" style="margin-top:12px">
+      <div class="muted">원금·기간·이율을 입력하면 월 납입금액이 자동 계산됩니다.</div>
+    </div>
+
+    <label>납입일 알림</label>
+    <select id="d_alert">
+      <option value="">알림 안 받음</option>
+      <option value="0">당일 아침</option>
+      <option value="1">1일 전</option>
+      <option value="3" selected>3일 전</option>
+      <option value="7">7일 전</option>
+    </select>
+    <button class="btn sub" onclick="addDebt()">＋ 대출 등록</button>
+  </div>
+
+  <div class="card">
     <h3>대출 상환 스케줄</h3>
     ${(S[MODE].debts||[]).length?S[MODE].debts.map(d=>{
-      const mo=loanMonthly(d);
-      const months=mo.principal>0?Math.ceil(d.bal/mo.principal):null;
-      return `<div class="item"><div class="ic" style="background:var(--debt)">貸</div>
-        <div class="mid"><div class="n">${d.name}</div>
-          <div class="s">잔액 ${wonS(d.bal)} · 연 ${d.rate}% · 매월 ${d.day}일<br>
-          월 이자 ${won(mo.int)}${mo.principal>0?` + 원금 ${won(mo.principal)}`:''}
-          ${months?` · 약 ${months}개월 후 완제`:' · 만기일시상환'}</div></div>
-      </div>`;}).join(''):'<div class="empty">등록된 대출이 없습니다. 자산·부채 탭에서 추가하세요.</div>'}
+      const info=loanInfo(d);
+      const st=loanAt(d,CUR.getFullYear(),CUR.getMonth()+1);
+      const bal=loanBalanceNow(d);
+      const pct=info.P>0?Math.round((1-bal/info.P)*100):0;
+      return `<div style="padding:12px 0;border-bottom:1px solid #f5f5f4">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <div class="ic" style="background:var(--debt);width:34px;height:34px;border-radius:9px;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:800">貸</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:700">${d.name}</div>
+            <div class="muted">${d.cat} · 연 ${d.rate}% · 매월 ${d.day}일
+              ${d.alertDays!==''&&d.alertDays!=null?` · 🔔 ${d.alertDays==0?'당일':d.alertDays+'일 전'}`:''}</div>
+          </div>
+          <button class="del" onclick="delItem('debts','${d.id}')">×</button>
+        </div>
+        <div class="row"><span class="lbl">남은 잔액</span><span class="val debt">${won(bal)}</span></div>
+        <div class="row"><span class="lbl">이번 달 납입액${st.k>0?` (${st.k}회차)`:''}</span><span class="val">${won(st.payment)}</span></div>
+        <div class="row"><span class="lbl">└ 이자 / 원금</span><span class="val" style="font-size:13px">${won(st.interest)} / ${won(st.principal)}</span></div>
+        <div class="row"><span class="lbl">상환 완료</span><span class="val">${loanEndLabel(d)}</span></div>
+        <div class="bar" style="margin-top:8px"><i style="width:${pct}%;background:var(--debt)"></i></div>
+        <div class="muted" style="text-align:right;margin-top:3px">${pct}% 상환</div>
+        <button class="btn sub" onclick="exportICS('${d.id}')">📅 캘린더에 납입일 등록 (.ics)</button>
+      </div>`;}).join(''):'<div class="empty">등록된 대출이 없습니다. 위에서 추가하세요.</div>'}
+    ${(S[MODE].debts||[]).length?`<button class="btn sub" onclick="askNoti()">🔔 앱 알림 켜기</button>
+    <div class="muted" style="margin-top:8px">앱 알림은 앱을 열었을 때 확인됩니다. 앱을 닫아도 확실히 받으려면 위 <b>캘린더에 등록</b>으로 구글 캘린더에 넣어두세요.</div>`:''}
   </div>`;
+}
+
+/* ── 월 납입금 실시간 미리보기 ── */
+function calcPreview(){
+  const box=document.getElementById('calcBox');
+  if(!box)return;
+  const P=+(document.getElementById('d_principal')||{}).value||0;
+  const rate=+(document.getElementById('d_rate')||{}).value||0;
+  const start=(document.getElementById('d_start')||{}).value;
+  const end=(document.getElementById('d_end')||{}).value;
+  const method=(document.getElementById('d_method')||{}).value||'만기일시';
+  if(!P){box.innerHTML='<div class="muted">원금·기간·이율을 입력하면 월 납입금액이 자동 계산됩니다.</div>';return;}
+  const tmp={principal:P,rate,start,end,method,day:1};
+  const info=loanInfo(tmp);
+  const first=loanAt({...tmp,start:start||new Date().toISOString().slice(0,10)},
+    new Date(start||Date.now()).getFullYear(), new Date(start||Date.now()).getMonth()+1);
+  const totalInterest = method==='만기일시'
+    ? P*info.r*info.n
+    : (info.n>0 ? (method==='원리금균등' ? info.monthly*info.n-P
+        : Array.from({length:info.n},(_,i)=>(P-(P/info.n)*i)*info.r).reduce((a,b)=>a+b,0)) : 0);
+  box.innerHTML=`
+    <div class="row"><span class="lbl">첫 달 납입액</span><span class="val" style="font-size:17px">${won(first.payment)}</span></div>
+    <div class="row"><span class="lbl">└ 이자 / 원금</span><span class="val" style="font-size:13px">${won(first.interest)} / ${won(first.principal)}</span></div>
+    ${info.n>0?`<div class="row"><span class="lbl">총 상환 회차</span><span class="val">${info.n}회 (${(info.n/12).toFixed(1)}년)</span></div>
+    <div class="row"><span class="lbl">총 이자 부담</span><span class="val out">${won(totalInterest)}</span></div>
+    <div class="row total"><span class="lbl">총 상환액</span><span class="val">${won(P+totalInterest)}</span></div>`
+    :'<div class="muted" style="margin-top:6px">만기일을 입력하면 총 회차와 이자 총액도 계산됩니다.</div>'}`;
+}
+
+/* ── 알림 ── */
+function askNoti(){
+  if(!('Notification' in window)){alert('이 브라우저는 알림을 지원하지 않습니다.');return;}
+  Notification.requestPermission().then(p=>{
+    if(p==='granted'){alert('알림이 켜졌습니다. 앱을 열 때 납입일이 다가온 대출을 알려드립니다.');checkAlerts();}
+    else alert('알림이 차단되어 있습니다. 브라우저 설정에서 허용해주세요.');
+  });
+}
+function checkAlerts(){
+  if(!('Notification' in window)||Notification.permission!=='granted')return;
+  const today=new Date();
+  const todayKey=today.toISOString().slice(0,10);
+  ['personal','corp'].forEach(mode=>{
+    (S[mode].debts||[]).forEach(d=>{
+      if(d.alertDays===''||d.alertDays==null)return;
+      const st=loanAt(d,today.getFullYear(),today.getMonth()+1);
+      if(st.done||st.before||st.payment<=0)return;
+      const dim=daysIn(today.getFullYear(),today.getMonth()+1);
+      const payDay=Math.min(d.day||1,dim);
+      const diff=payDay-today.getDate();
+      if(diff<0||diff>+d.alertDays)return;
+      if(d.lastNoti===todayKey)return;
+      new Notification('납입일 알림 · 새암 가계부',{
+        body:`${d.name}\n${diff===0?'오늘':diff+'일 뒤'} ${payDay}일 · ${won(st.payment)} 납입 예정`,
+        icon:'icon-192.png', tag:'loan_'+d.id
+      });
+      d.lastNoti=todayKey;
+    });
+  });
+  save();
+}
+
+/* ── 구글 캘린더용 .ics 내보내기 ── */
+function exportICS(id){
+  const d=(S[MODE].debts||[]).find(x=>x.id===id);
+  if(!d)return;
+  const info=loanInfo(d), st=loanAt(d,new Date().getFullYear(),new Date().getMonth()+1);
+  const alertD = (d.alertDays===''||d.alertDays==null) ? 3 : +d.alertDays;
+  const p=(d.start||new Date().toISOString().slice(0,10)).split('-').map(Number);
+  const sy=p[0], sm=p[1], sd=p[2];
+  const dim=daysIn(sy,sm);
+  const day=Math.min(d.day||1,dim);
+  // 시작월의 납입일이 이미 지났으면 다음 달부터
+  const first = day>=sd ? new Date(sy,sm-1,day) : new Date(sy,sm,day);
+  const fmt=dt=>dt.getFullYear()+String(dt.getMonth()+1).padStart(2,'0')+String(dt.getDate()).padStart(2,'0');
+  let until='';
+  if(info.n>0){
+    const e=new Date(first.getFullYear(),first.getMonth()+info.n,day);
+    until=`;UNTIL=${fmt(e)}T000000Z`;
+  }
+  const ics=[
+    'BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Saeam Ledger//KR','CALSCALE:GREGORIAN',
+    'BEGIN:VEVENT',
+    `UID:${d.id}@saeam-ledger`,
+    `DTSTAMP:${fmt(new Date())}T090000Z`,
+    `DTSTART;VALUE=DATE:${fmt(first)}`,
+    `RRULE:FREQ=MONTHLY;BYMONTHDAY=${day}${until}`,
+    `SUMMARY:${d.name} 납입일 (약 ${won(st.payment)})`,
+    `DESCRIPTION:연 ${d.rate}% · ${d.method} · 원금 ${won(info.P)}\\n새암 가계부에서 생성`,
+    'BEGIN:VALARM',`TRIGGER:-P${alertD}D`,'ACTION:DISPLAY',`DESCRIPTION:${d.name} 납입일 ${alertD}일 전`,'END:VALARM',
+    'END:VEVENT','END:VCALENDAR'
+  ].join('\r\n');
+  const b=new Blob([ics],{type:'text/calendar;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(b);
+  a.download=`${d.name}_납입일.ics`;
+  a.click();
+  setTimeout(()=>alert('다운로드된 .ics 파일을 열면 구글 캘린더에 매월 반복 일정으로 등록됩니다.'),300);
 }
 function toggleRecur(id){const r=S[MODE].recur.find(x=>x.id===id);if(r){r.on=!r.on;save();render();}}
 function addRecur(){
@@ -823,11 +1035,17 @@ function importJSON(e){
   r.readAsText(f);
 }
 function resetAll(){
-  if(!confirm('모든 데이터가 삭제됩니다. 계속할까요?'))return;
-  S=blank();save();render();
+  if(!confirm('입력한 모든 데이터가 삭제됩니다. 계속할까요?'))return;
+  S=blank();save();TAB='dash';render();
+  alert('초기화되었습니다.');
+}
+function loadSample(){
+  if(!confirm('예시 데이터를 불러오면 지금 입력한 내용이 모두 대체됩니다. 계속할까요?'))return;
+  S=sample();save();TAB='dash';render();
 }
 
 render();
+setTimeout(checkAlerts,1500);
 
 /* ═══════════════ PWA 설치 · 오프라인 ═══════════════ */
 let deferredPrompt=null;
