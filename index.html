@@ -324,9 +324,31 @@ function splitDefaults(){
     avg:0, qty:0, turn:0, // 평단 / 보유수량 / 회차
     closes:[],            // 최근 종가 (소진구간 기준선 산정용)
     useSMA:true,          // 소진구간에서 종가평균을 기준선으로 사용
-    firstDay:false        // 소진 첫날 (매수 없음)
+    firstDay:false,       // 소진 첫날 (매수 없음)
+    buyFee:0.25,          // 매수 수수료 %
+    sellFee:0.25,         // 매도 수수료 %
+    sellTax:0.00206,      // 매도 제세금 %
+    feeOn:true            // 수수료 보정 사용
   };
 }
+
+/* ── 수수료·제세금 보정 ──
+   매수:  실제 출금 = 체결금액 × (1 + 매수수수료)
+   매도:  실제 입금 = 체결금액 × (1 − 매도수수료 − 제세금)
+   왕복계수 = (1 + 매수수수료) / (1 − 매도수수료 − 제세금)
+   → 목표수익률을 "수수료까지 뺀 실수령 기준"으로 맞추려면 매도가에 왕복계수를 곱한다 */
+function splitFee(p){
+  const on = p.feeOn!==false;
+  const b  = on ? (+p.buyFee||0)/100  : 0;
+  const s  = on ? (+p.sellFee||0)/100 : 0;
+  const t  = on ? (+p.sellTax||0)/100 : 0;
+  const denom = Math.max(0.5, 1-s-t);
+  return { on, b, s, t, buyMul:1+b, sellMul:denom, rt:(1+b)/denom };
+}
+// 수수료 포함 실질 평단 (취득원가 기준)
+function splitRealAvg(p){ return (+p.avg||0)*splitFee(p).buyMul; }
+// 손익분기 가격 (이 가격에 팔면 수수료까지 정확히 본전)
+function splitBreakeven(p){ return (+p.avg||0)*splitFee(p).rt; }
 
 // 구간 판정
 function splitPhase(p){
@@ -360,16 +382,19 @@ function splitUnitBuy(p){
 // 매수 주문표
 function splitBuyOrders(p){
   const b=splitBaseline(p), unit=splitUnitBuy(p);
+  const F=splitFee(p);
+  // 수수료를 포함한 실제 출금액이 1회 매수금을 넘지 않도록 수량을 정한다
+  const qOf=(budget,px)=> px>0 ? Math.floor(budget/(px*F.buyMul)) : 0;
   const out=[];
   if(p.firstDay && b.phase==='exhaust') return out;   // 소진 첫날은 매수 없음
   const buyPx = Math.max(0.01, b.price - 0.01);       // 매도와 겹침 방지
   if(b.phase==='front'){
     const r=(+p.frontRatio||50)/100;
     const a1=unit*r, a2=unit*(1-r);
-    if(buyPx>0) out.push({label:'기준선', px:buyPx, qty:Math.floor(a1/buyPx), key:true});
-    if(p.avg>0) out.push({label:'평단', px:p.avg, qty:Math.floor(a2/p.avg), key:true});
+    if(buyPx>0) out.push({label:'기준선', px:buyPx, qty:qOf(a1,buyPx), key:true});
+    if(p.avg>0) out.push({label:'평단', px:p.avg, qty:qOf(a2,p.avg), key:true});
   }else{
-    if(buyPx>0) out.push({label:'기준선', px:buyPx, qty:Math.floor(unit/buyPx), key:true});
+    if(buyPx>0) out.push({label:'기준선', px:buyPx, qty:qOf(unit,buyPx), key:true});
   }
   // 추가매수 사다리
   const base = out.length ? out[out.length-1].px : buyPx;
@@ -386,24 +411,28 @@ function splitBuyOrders(p){
 // 매도 주문표
 function splitSellOrders(p){
   const b=splitBaseline(p);
+  const F=splitFee(p);
   const qty=Math.floor(+p.qty||0);
   const out=[];
   if(qty<=0) return out;
+  // 목표수익률을 실수령 기준으로 맞추기 위해 매도가에 왕복계수를 곱한다
+  const adj = px => Math.round(px*F.rt*100)/100;
+  const tgt = adj(p.avg*(1+(+p.sellTarget||0)/100));
   if(b.phase==='exhaust'){
     const n=Math.max(2,Math.round((+p.a||40)/2));
     const part=Math.floor(qty/n);
     if(p.firstDay){
       out.push({label:'전량기준 분할 (종가매도)', px:null, qty:part, key:true, note:'MOC'});
     }else{
-      out.push({label:'기준선', px:b.price, qty:part, key:true});
+      out.push({label:'기준선', px:adj(b.price), qty:part, key:true});
     }
     const rest=qty-part;
-    if(rest>0) out.push({label:'목표가', px:p.avg*(1+(+p.sellTarget||0)/100), qty:rest});
+    if(rest>0) out.push({label:'목표가', px:tgt, qty:rest});
   }else{
     const part=Math.floor(qty*(+p.partRatio||25)/100);
-    if(part>0) out.push({label:'기준선', px:b.price, qty:part, key:true});
+    if(part>0) out.push({label:'기준선', px:adj(b.price), qty:part, key:true});
     const rest=qty-part;
-    if(rest>0) out.push({label:'목표가', px:p.avg*(1+(+p.sellTarget||0)/100), qty:rest});
+    if(rest>0) out.push({label:'목표가', px:tgt, qty:rest});
   }
   return out;
 }
@@ -1146,7 +1175,7 @@ function vSplit(){
 
   if(!SPLIT_SEL||!list.find(x=>x.id===SPLIT_SEL)) SPLIT_SEL=list[0].id;
   const p=list.find(x=>x.id===SPLIT_SEL);
-  const b=splitBaseline(p), unit=splitUnitBuy(p);
+  const b=splitBaseline(p), unit=splitUnitBuy(p), F=splitFee(p);
   const buys=splitBuyOrders(p), sells=splitSellOrders(p);
   const a=+p.a||40;
   const progress=Math.min(100,Math.round(p.turn/a*100));
@@ -1170,6 +1199,9 @@ function vSplit(){
     <div class="kv"><span class="lbl">잔금</span><b>${(+p.cash||0).toLocaleString('ko-KR',{maximumFractionDigits:2})} $</b></div>
     <div class="kv"><span class="lbl">기준선 (${b.src})</span><b class="${b.pct>=0?'in':'out'}">${b.price?b.price.toFixed(2)+' $':'—'} (${b.pct>=0?'+':''}${b.pct.toFixed(2)}%)</b></div>
     <div class="kv"><span class="lbl">1회 매수금</span><b>${unit.toLocaleString('ko-KR',{maximumFractionDigits:2})} $</b></div>
+    ${F.on&&p.avg>0?`
+    <div class="kv"><span class="lbl">실질 평단 <span class="muted">(수수료 포함)</span></span><b>${splitRealAvg(p).toFixed(4)} $</b></div>
+    <div class="kv"><span class="lbl">손익분기 가격</span><b class="out">${splitBreakeven(p).toFixed(4)} $</b></div>`:''}
     <div class="bar" style="margin-top:8px"><i style="width:${progress}%"></i></div>
     <div class="muted" style="text-align:right;margin-top:3px">${progress}% 진행</div>
     ${p.firstDay?`<div class="alert" style="margin-top:10px"><div class="t">소진 첫날</div><div class="d">이 설정에서는 첫날 매수를 걸지 않고 매도만 진행합니다.</div></div>`:''}
@@ -1186,7 +1218,9 @@ function vSplit(){
       <tfoot><tr><td>합계</td><td></td><td>${buys.reduce((s,o)=>s+o.qty,0)}</td>
         <td>${buys.reduce((s,o)=>s+o.px*o.qty,0).toFixed(0)}</td></tr></tfoot>
     </table>
-    <div class="muted" style="margin-top:8px">기준선 매수가는 매도와 동시 체결되지 않도록 0.01 낮춰 계산했습니다.</div>`
+    <div class="muted" style="margin-top:8px">기준선 매수가는 매도와 동시 체결되지 않도록 0.01 낮춰 계산했습니다.
+    ${F.on?`<br>수량은 <b>수수료 ${(F.b*100).toFixed(3)}%를 더한 실제 출금액</b>이 1회 매수금을 넘지 않도록 산정했습니다.
+    (기준선 전량 체결 시 출금 약 ${(buys.reduce((s,o)=>s+o.px*o.qty,0)*F.buyMul).toFixed(2)} \$)`:''}</div>`
     :'<div class="empty">이 상태에서는 매수 주문이 산출되지 않습니다</div>'}
   </div>
 
@@ -1199,7 +1233,12 @@ function vSplit(){
         <td>${o.px?o.px.toFixed(2):'종가'}</td><td>${o.qty}</td>
         <td>${o.px?(o.px*o.qty).toFixed(0):'—'}</td></tr>`).join('')}</tbody>
       <tfoot><tr><td>합계</td><td></td><td>${sells.reduce((s,o)=>s+o.qty,0)}</td><td></td></tr></tfoot>
-    </table>`:'<div class="empty">보유수량이 없습니다</div>'}
+    </table>
+    ${F.on?`<div class="muted" style="margin-top:8px">매도가에 <b>왕복 수수료 ${((F.rt-1)*100).toFixed(4)}%</b>를 더했습니다.
+      따라서 표의 가격에 팔면 수수료·제세금을 뺀 <b>실수령 기준</b>으로 설정한 수익률이 나옵니다.<br>
+      목표가 ${sells.length>1?sells[sells.length-1].px.toFixed(2):'—'} \$ 전량 매도 시 실수령 약
+      ${sells.length?(sells.reduce((s,o)=>s+(o.px||0)*o.qty,0)*F.sellMul).toFixed(2):'0'} \$</div>`:''}`
+    :'<div class="empty">보유수량이 없습니다</div>'}
   </div>
 
   <div class="card">
@@ -1253,6 +1292,20 @@ function vSplit(){
         </select>
       </div>
     </div>
+    <div class="hr"></div>
+    <label>수수료 · 제세금 <span class="muted">(증권사 조건에 맞게 입력)</span></label>
+    <select id="sc_feeOn" style="margin-bottom:6px">
+      <option value="1" ${F.on?'selected':''}>수수료 보정 사용</option>
+      <option value="0" ${!F.on?'selected':''}>사용하지 않음 (이론가 그대로)</option>
+    </select>
+    <div class="grid2">
+      <div><label>매수 수수료 %</label><input type="number" step="0.00001" id="sc_buyFee" value="${p.buyFee??0}"></div>
+      <div><label>매도 수수료 %</label><input type="number" step="0.00001" id="sc_sellFee" value="${p.sellFee??0}"></div>
+    </div>
+    <label>매도 제세금 %</label>
+    <input type="number" step="0.00001" id="sc_sellTax" value="${p.sellTax??0}">
+    <div class="muted" style="margin-top:6px">현재 왕복 비용 <b>${((F.rt-1)*100).toFixed(4)}%</b> — 매수 직후 이만큼 올라야 본전입니다.</div>
+    <div class="hr"></div>
     <button class="btn sub" onclick="splitSaveCfg('${p.id}')">설정 저장</button>
     <button class="btn sub" onclick="splitEvent('${p.id}','reset')">사이클 초기화 (원금으로 되돌리기)</button>
     <button class="btn sub danger" onclick="splitDel('${p.id}')">이 사이클 삭제</button>
@@ -1267,6 +1320,13 @@ function vSplit(){
       소진구간 1회 매수금 = 잔금 ÷ 4<br>
       전반부·후반부 경계 = 분할수 ÷ 2<br>
       소진구간 진입 = 회차 ≥ 분할수 − 1
+      <div class="hr"></div>
+      <b>수수료 보정</b><br>
+      왕복계수 = (1 + 매수수수료) ÷ (1 − 매도수수료 − 제세금)<br>
+      실질 평단 = 평단 × (1 + 매수수수료)<br>
+      손익분기 가격 = 평단 × 왕복계수<br>
+      매도 주문가 = 이론가 × 왕복계수<br>
+      매수 수량 = ⌊배분금액 ÷ (가격 × (1 + 매수수수료))⌋
     </div>
   </div>
   ${splitDisclaimer()}`;
@@ -1303,6 +1363,22 @@ function vSplitNew(){
     </div>
     <label>사다리 하락률 %</label>
     <input type="number" step="0.1" id="nc_ladderDrop" value="${d.ladderDrop}">
+    <div class="hr"></div>
+    <label>수수료 · 제세금 <span class="muted">(증권사 조건)</span></label>
+    <div class="grid2">
+      <div><label>매수 수수료 %</label><input type="number" step="0.00001" id="nc_buyFee" value="${d.buyFee}"></div>
+      <div><label>매도 수수료 %</label><input type="number" step="0.00001" id="nc_sellFee" value="${d.sellFee}"></div>
+    </div>
+    <label>매도 제세금 %</label>
+    <input type="number" step="0.00001" id="nc_sellTax" value="${d.sellTax}">
+    <div class="hr"></div>
+    <label>이미 보유 중이라면 <span class="muted">(진행 중인 종목을 이어서 계산할 때)</span></label>
+    <div class="grid2">
+      <div><label>현재 평단 (\$)</label><input type="number" step="0.0001" id="nc_avg" placeholder="비워두면 0"></div>
+      <div><label>보유수량</label><input type="number" id="nc_qty" placeholder="비워두면 0"></div>
+    </div>
+    <div class="muted" style="margin-bottom:8px">평단·수량을 넣으면 <b>회차와 잔금을 자동으로 역산</b>합니다.
+      회차 = 매입금액 ÷ (원금 ÷ 분할수), 잔금 = 원금 − 매입금액(수수료 포함).</div>
     <button class="btn" onclick="splitAdd()">사이클 등록</button>
     <button class="btn sub" onclick="go('split')">취소</button>
     <div class="muted" style="margin-top:8px">모든 값은 나중에 바꿀 수 있습니다. 분할수가 클수록 1회 매수금이 작아집니다.</div>
@@ -1321,6 +1397,16 @@ function splitAdd(){
   p.sellTarget=+g('nc_sellTarget')||10; p.partRatio=+g('nc_partRatio')||25;
   p.frontRatio=+g('nc_frontRatio')||50;
   p.ladderSteps=+g('nc_ladderSteps')||0; p.ladderDrop=+g('nc_ladderDrop')||0;
+  p.buyFee=+g('nc_buyFee')||0; p.sellFee=+g('nc_sellFee')||0; p.sellTax=+g('nc_sellTax')||0;
+  // 이미 보유 중인 종목 → 회차·잔금 역산
+  const avg=+g('nc_avg')||0, qty=Math.floor(+g('nc_qty')||0);
+  if(avg>0 && qty>0){
+    const F=splitFee(p);
+    const cost = avg*qty*F.buyMul;          // 수수료 포함 취득원가
+    p.avg=avg; p.qty=qty;
+    p.cash = Math.max(0, Math.round((principal-cost)*100)/100);
+    p.turn = Math.round(Math.min(p.a, cost/(principal/p.a))*100000)/100000;
+  }
   S.personal.splits=S.personal.splits||[];
   S.personal.splits.push(p);
   SPLIT_SEL=p.id; save(); TAB='split'; render();
@@ -1342,6 +1428,10 @@ function splitSaveCfg(id){
   p.frontRatio=+g('sc_frontRatio')||50;
   p.ladderSteps=+g('sc_ladderSteps')||0; p.ladderDrop=+g('sc_ladderDrop')||0;
   p.useSMA = g('sc_useSMA')==='1';
+  p.feeOn  = g('sc_feeOn')!=='0';
+  p.buyFee = +g('sc_buyFee')||0;
+  p.sellFee= +g('sc_sellFee')||0;
+  p.sellTax= +g('sc_sellTax')||0;
   save(); render();
 }
 function splitDel(id){
