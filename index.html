@@ -37,10 +37,19 @@ header{position:sticky;top:0;z-index:20;background:var(--card);border-bottom:1px
   font-size:13px;font-weight:700;color:var(--sub);cursor:pointer;transition:.15s}
 .modeToggle button.on{background:var(--personal);color:#fff}
 body.corp .modeToggle button.on{background:var(--corp)}
-.monthNav{margin-left:auto;display:flex;align-items:center;gap:4px}
-.monthNav button{border:0;background:#f5f5f4;width:28px;height:28px;border-radius:8px;
-  cursor:pointer;font-size:14px;color:var(--sub)}
-.monthNav span{font-weight:700;font-size:14px;min-width:78px;text-align:center}
+.monthNav{display:flex;align-items:center;gap:3px;flex:0 0 auto}
+.monthNav button{border:0;background:#f5f5f4;width:26px;height:28px;border-radius:8px;
+  cursor:pointer;font-size:14px;color:var(--sub);flex:0 0 auto;font-family:inherit}
+.monthNav button:active{background:#e7e5e4}
+.ymBox{display:flex;align-items:baseline;gap:1px;background:#f5f5f4;border-radius:8px;
+  padding:3px 6px;height:28px;box-sizing:border-box}
+.ymIn{border:0;background:transparent;font-family:inherit;font-weight:800;font-size:14px;
+  color:var(--ink);text-align:center;padding:0;-moz-appearance:textfield;
+  font-variant-numeric:tabular-nums}
+.ymIn::-webkit-outer-spin-button,.ymIn::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.ymIn:focus{outline:0;background:#fff;border-radius:5px}
+.ymIn.y{width:38px} .ymIn.m{width:24px}
+.ymDot{font-size:14px;font-weight:800;color:var(--sub)}
 
 /* ── layout ── */
 main{padding:14px}
@@ -126,11 +135,10 @@ nav.bn button{flex:1 0 auto;min-width:48px;border:0;background:transparent;paddi
   white-space:nowrap}
 nav.bn button .i{display:block;font-size:17px;margin-bottom:2px}
 /* ── 입력 시트 (연필 버튼) ── */
-.penBtn{position:absolute;right:14px;top:50%;transform:translateY(-50%);
-  width:38px;height:38px;border-radius:11px;border:1px solid var(--line);background:#fff;
-  font-size:17px;cursor:pointer;line-height:1;z-index:5}
+.penBtn{margin-left:auto;flex:0 0 auto;width:36px;height:34px;border-radius:10px;
+  border:1px solid var(--line);background:#fff;font-size:16px;cursor:pointer;line-height:1;
+  font-family:inherit}
 .penBtn:active{background:#f5f5f4}
-header{position:relative}
 .sheet{display:none;position:fixed;inset:0;z-index:60;background:rgba(28,25,23,.45)}
 .sheet.on{display:block}
 .sheetBox{position:absolute;left:0;right:0;bottom:0;max-width:520px;margin:0 auto;
@@ -265,9 +273,15 @@ body.corp nav.bn button.on{color:var(--corp)}
       <button id="mC" onclick="setMode('corp')">법인</button>
     </div>
     <div class="monthNav">
-      <button onclick="moveMonth(-1)">‹</button>
-      <span id="monthLabel"></span>
-      <button onclick="moveMonth(1)">›</button>
+      <button onclick="moveMonth(-1)" aria-label="이전 달">‹</button>
+      <span class="ymBox">
+        <input type="number" class="ymIn y" id="ymY" inputmode="numeric" aria-label="연도"
+          oninput="ymStep('y',this)" onblur="applyYm()" onfocus="this.select()">
+        <span class="ymDot">.</span>
+        <input type="number" class="ymIn m" id="ymM" inputmode="numeric" aria-label="월"
+          min="1" max="12" oninput="ymStep('m',this)" onblur="applyYm()" onfocus="this.select()">
+      </span>
+      <button onclick="moveMonth(1)" aria-label="다음 달">›</button>
     </div>
     <button class="penBtn" onclick="openAdd()" aria-label="거래 입력">✏️</button>
   </header>
@@ -938,9 +952,37 @@ function setMode(m){MODE=m;TAB='dash';
 function moveMonth(d){CUR=new Date(CUR.getFullYear(),CUR.getMonth()+d,1);render();}
 function go(t){TAB=t;render();window.scrollTo(0,0);}
 
+/* ── 연·월 직접 입력 ── */
+function paintYm(){
+  const y=CUR.getFullYear(), m=CUR.getMonth()+1;
+  const Y=document.getElementById('ymY'), M=document.getElementById('ymM');
+  const act=document.activeElement;
+  if(Y&&Y!==act) Y.value=y;                         // 타이핑 중에는 덮어쓰지 않는다
+  if(M&&M!==act) M.value=String(m).padStart(2,'0');
+}
+function applyYm(){
+  const Y=document.getElementById('ymY'), M=document.getElementById('ymM');
+  if(!Y||!M){return;}
+  let y=parseInt(Y.value,10), m=parseInt(M.value,10);
+  if(!y||y<1900||y>2999) y=CUR.getFullYear();       // 이상한 값은 되돌린다
+  if(!m||m<1) m=1; if(m>12) m=12;
+  CUR=new Date(y,m-1,1);
+  render();
+}
+function ymStep(part,el){
+  let v=String(el.value||'');
+  if(part==='y'){
+    if(v.length>4){ el.value=v.slice(0,4); v=el.value; }
+    if(v.length>=4){ const n=document.getElementById('ymM'); if(n){n.focus();n.select&&n.select();} }
+  }else{
+    if(+v>12){ el.value='12'; v='12'; }
+    if(v.length>=2||+v>1){ el.blur(); applyYm(); }
+  }
+}
+
 function render(){
   const y=CUR.getFullYear(),m=CUR.getMonth()+1;
-  document.getElementById('monthLabel').textContent=`${y}.${String(m).padStart(2,'0')}`;
+  paintYm();
   const tabs=MODE==='personal'
     ?[['dash','📊','대시보드'],['list','📋','한달보기'],['year','📅','일년보기'],['stat','🍩','통계'],
       ['bs','🏦','자산·부채'],['recur','🔁','반복·대출'],['split','📐','분할매수']]
