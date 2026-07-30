@@ -142,17 +142,20 @@ header{position:relative}
 .sheetBar b{font-size:15px;font-weight:800}
 .sheetX{border:0;background:transparent;font-size:24px;line-height:1;color:var(--sub);
   cursor:pointer;padding:0 4px;font-family:inherit}
-/* ── 일년보기 ── */
-.yRow{display:flex;align-items:center;gap:8px;padding:5px 0}
-.yRow+.yRow{border-top:1px solid #f5f5f4}
-.yLbl{font-size:11.5px;color:var(--sub);font-weight:700;min-width:52px;
-  font-variant-numeric:tabular-nums}
-.yBarWrap{flex:1;height:8px;background:#f5f5f4;border-radius:4px;overflow:hidden;min-width:30px}
-.yBarWrap i{display:block;height:100%;border-radius:4px}
-.yBarWrap i.in{background:var(--in)} .yBarWrap i.out{background:var(--out)}
-.yBarWrap i.asset{background:var(--asset)}
-.yVal{font-size:11.5px;font-weight:800;min-width:96px;text-align:right;
-  font-variant-numeric:tabular-nums}
+/* ── 일년보기 (월별 블록) ── */
+.mBlock{display:flex;gap:11px;padding:11px 0;border-bottom:1px solid #f5f5f4}
+.mBlock:last-of-type{border-bottom:0}
+.mBlock.now{background:#fffbeb;border-radius:10px;padding:11px 10px;margin:0 -10px}
+.mYm{flex:0 0 auto;min-width:52px;font-size:13.5px;font-weight:800;
+  font-variant-numeric:tabular-nums;padding-top:1px}
+.mNow{display:block;font-size:9.5px;font-weight:800;color:var(--warn);margin-top:2px}
+.mVals{flex:1;min-width:0}
+.mLine{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:3px 0}
+.mLine+.mLine{border-top:1px dashed #f0efec}
+.mK{font-size:12px;color:var(--sub);font-weight:700;flex:0 0 auto}
+.mK i{display:block;font-size:10px;font-style:normal;color:#a8a29e;font-weight:600;margin-top:1px}
+.mV{font-size:13px;font-weight:800;text-align:right;font-variant-numeric:tabular-nums;
+  word-break:keep-all}
 /* ── 통계 도넛 ── */
 .donut{width:100%;height:auto;display:block;margin:2px 0 4px}
 .donut .dcT{font-size:10.5px;font-weight:700;fill:var(--sub)}
@@ -1100,27 +1103,42 @@ function debtAt(mode,y,m){
     return s+(st.before?(d.principal||d.bal||0):Math.max(0,st.balance));
   },0);
 }
-// 막대 하나 (음수는 반대편으로)
-function barRow(label,val,max,cls){
-  const w=max>0?Math.min(100,Math.abs(val)/max*100):0;
-  return `<div class="yRow">
-    <span class="yLbl">${label}</span>
-    <span class="yBarWrap"><i class="${cls}" style="width:${w}%"></i></span>
-    <span class="yVal ${cls}">${won(val)}</span>
+// 해당 연월 말 기준 가지급금·가수금
+function advBalanceAt(y,m){
+  const cut=`${y}-${String(m).padStart(2,'0')}-31`;
+  let 가지급금=0,가수금=0;
+  (S.corp.adv||[]).forEach(a=>{
+    if(a.back)return;
+    if((a.date||'')>cut)return;
+    if(a.dir==='가지급금')가지급금+=a.amt; else 가수금+=a.amt;
+  });
+  return{가지급금,가수금,net:가지급금-가수금};
+}
+// 월 한 칸 — 왼쪽에 연월, 오른쪽에 지표를 세로로 쌓는다
+function monthBlock(label,rows,isNow){
+  return `<div class="mBlock${isNow?' now':''}">
+    <div class="mYm">${label}${isNow?'<span class="mNow">이번 달</span>':''}</div>
+    <div class="mVals">
+      ${rows.map(r=>`<div class="mLine">
+        <span class="mK">${r.k}${r.sub?`<i>${r.sub}</i>`:''}</span>
+        <span class="mV ${r.cls||''}">${won(r.v)}</span>
+      </div>`).join('')}
+    </div>
   </div>`;
 }
 
 function vYear(y,m){
-  const months=last12(y,m);
+  const months=last12(y,m).reverse();          // 당월이 맨 위
   const aTot=(S[MODE].assets||[]).reduce((s,a)=>s+(a.val||0),0);
+  const lbl=(yy,mm)=>`${String(yy).slice(2)}.${String(mm).padStart(2,'0')}`;
+  const isNow=(yy,mm)=>yy===y&&mm===m;
+
   if(MODE==='personal'){
     const rows=months.map(([yy,mm])=>{
       const P=pnl('personal',yy,mm);
       return{yy,mm,net:P.net,inTot:P.inTot,outTot:P.outTot,
              worth:aTot-debtAt('personal',yy,mm)};
     });
-    const maxNet=Math.max(1,...rows.map(r=>Math.abs(r.net)));
-    const maxW=Math.max(1,...rows.map(r=>Math.abs(r.worth)));
     const sumIn=rows.reduce((s,r)=>s+r.inTot,0), sumOut=rows.reduce((s,r)=>s+r.outTot,0);
     return `
     <div class="card">
@@ -1133,25 +1151,23 @@ function vYear(y,m){
         <span class="val ${sumIn-sumOut>=0?'in':'out'}">${won((sumIn-sumOut)/12)}</span></div>
     </div>
     <div class="card">
-      <h3>월별 손익</h3>
-      ${rows.map(r=>barRow(`${r.yy}.${String(r.mm).padStart(2,'0')}`,r.net,maxNet,r.net>=0?'in':'out')).join('')}
-    </div>
-    <div class="card">
-      <h3>월별 순자산</h3>
-      ${rows.map(r=>barRow(`${r.yy}.${String(r.mm).padStart(2,'0')}`,r.worth,maxW,'asset')).join('')}
-      <div class="muted" style="margin-top:8px">자산은 현재 등록된 평가액으로 고정하고 <b>부채 잔액만 월별로 계산</b>했습니다.
-        따라서 이 추이는 대출을 갚아나가며 순자산이 늘어나는 흐름을 보여줍니다. 과거 시점의 자산 평가액은 기록하지 않습니다.</div>
+      <h3>월별 현황 <span class="muted">(최근 12개월)</span></h3>
+      ${rows.map(r=>monthBlock(lbl(r.yy,r.mm),[
+        {k:'손익',   v:r.net,   cls:r.net>=0?'in':'out'},
+        {k:'순자산', v:r.worth, cls:'asset'}
+      ],isNow(r.yy,r.mm))).join('')}
+      <div class="muted" style="margin-top:10px">순자산은 자산을 현재 등록된 평가액으로 고정하고 <b>부채 잔액만 월별로 계산</b>한 값입니다.
+        대출을 갚아나가며 순자산이 늘어나는 흐름을 보여줍니다. 과거 시점의 자산 평가액은 기록하지 않습니다.</div>
     </div>`;
   }
+
   // ── 법인 ──
-  const A=advBalance();
   const rows=months.map(([yy,mm])=>{
-    const C=corpPnl(yy,mm);
-    return{yy,mm,net:C.net,revOp:C.revOp,cap:aTot-debtAt('corp',yy,mm)};
+    const C=corpPnl(yy,mm), A=advBalanceAt(yy,mm);
+    return{yy,mm,net:C.net,revOp:C.revOp,cap:aTot-debtAt('corp',yy,mm),A};
   });
-  const maxNet=Math.max(1,...rows.map(r=>Math.abs(r.net)));
-  const maxCap=Math.max(1,...rows.map(r=>Math.abs(r.cap)));
   const sumNet=rows.reduce((s,r)=>s+r.net,0), sumRev=rows.reduce((s,r)=>s+r.revOp,0);
+  const now=rows[0]?rows[0].A:{가지급금:0,가수금:0,net:0};
   return `
   <div class="card">
     <h3>12개월 합계</h3>
@@ -1160,32 +1176,22 @@ function vYear(y,m){
       <span class="val ${sumNet>=0?'in':'out'}">${won(sumNet)}</span></div>
     <div class="row"><span class="lbl">월평균</span>
       <span class="val ${sumNet>=0?'in':'out'}">${won(sumNet/12)}</span></div>
-  </div>
-  <div class="card">
-    <h3>월별 당기순이익</h3>
-    ${rows.map(r=>barRow(`${r.yy}.${String(r.mm).padStart(2,'0')}`,r.net,maxNet,r.net>=0?'in':'out')).join('')}
-  </div>
-  <div class="card">
-    <h3>월별 자본 총계</h3>
-    ${rows.map(r=>barRow(`${r.yy}.${String(r.mm).padStart(2,'0')}`,r.cap,maxCap,'asset')).join('')}
-    <div class="muted" style="margin-top:8px">자산은 현재 등록된 평가액으로 고정하고 부채 잔액만 월별로 계산했습니다.</div>
-  </div>
-  <div class="card">
-    <h3>가지급금 · 가수금 현황</h3>
-    <div class="row"><span class="lbl">가지급금 <span class="muted">(법인→대표)</span></span>
-      <span class="val ${A.가지급금>0?'out':''}">${won(A.가지급금)}</span></div>
-    <div class="row"><span class="lbl">가수금 <span class="muted">(대표→법인)</span></span>
-      <span class="val">${won(A.가수금)}</span></div>
-    <div class="row total"><span class="lbl">순액</span>
-      <span class="val ${A.가지급금-A.가수금>0?'out':'in'}">${won(A.가지급금-A.가수금)}</span></div>
-    ${A.가지급금>0?`<div class="hr"></div>
-    <div class="row"><span class="lbl">연 인정이자 <span class="muted">(4.6% 기준)</span></span>
-      <span class="val out">${won(A.가지급금*0.046)}</span></div>
+    ${now.가지급금>0?`<div class="hr"></div>
+    <div class="row"><span class="lbl">가지급금 연 인정이자 <span class="muted">(4.6%)</span></span>
+      <span class="val out">${won(now.가지급금*0.046)}</span></div>
     <div class="muted" style="margin-top:6px">가지급금은 당좌대출이자율 4.6%로 인정이자가 익금산입되고 대표 상여로 처분됩니다. 세무조사 1순위 항목입니다.</div>`:''}
-    ${(S.corp.adv||[]).filter(a=>!a.back).length?`<div class="hr"></div>
-    ${(S.corp.adv||[]).filter(a=>!a.back).sort((a,b)=>b.date.localeCompare(a.date)).map(a=>
-      `<div class="kv"><span class="lbl">${a.date} · ${a.dir}<br><span class="muted">${a.reason||''}</span></span>
-       <b class="${a.dir==='가지급금'?'out':''}">${won(a.amt)}</b></div>`).join('')}`:''}
+  </div>
+  <div class="card">
+    <h3>월별 현황 <span class="muted">(최근 12개월)</span></h3>
+    ${rows.map(r=>monthBlock(lbl(r.yy,r.mm),[
+      {k:'당기순이익', v:r.net, cls:r.net>=0?'in':'out'},
+      {k:'자본 총계',  v:r.cap, cls:'asset'},
+      {k:'가지급금·가수금',
+       sub:(r.A.가지급금||r.A.가수금)?`가지급 ${won(r.A.가지급금)} / 가수 ${won(r.A.가수금)}`:'',
+       v:r.A.net, cls:r.A.net>0?'out':'in'}
+    ],isNow(r.yy,r.mm))).join('')}
+    <div class="muted" style="margin-top:10px">자본 총계는 자산을 현재 평가액으로 고정하고 부채 잔액만 월별로 계산했습니다.
+      가지급금·가수금은 <b>순액</b>이며, 양수이면 법인 돈이 대표에게 나가 있는 상태입니다.</div>
   </div>`;
 }
 
