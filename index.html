@@ -425,6 +425,15 @@ function u(){return Math.random().toString(36).slice(2,10)}
 let S=load()||blank();
 // 구버전 데이터 호환
 if(!S.personal.splits) S.personal.splits=[];
+/* ── 1회성 데이터 보정 ──
+   이미 만들어둔 종목은 저장된 설정을 그대로 쓰므로 기본값을 바꿔도 반영되지 않는다.
+   잘못된 기본값으로 만들어진 항목만 한 번 고치고, 이후 사용자가 바꾼 값은 건드리지 않는다. */
+S.__mig = S.__mig || {};
+if(!S.__mig.ladderLOC){
+  (S.personal.splits||[]).forEach(p=>{ if(p.ordLadder==='지정가') p.ordLadder='LOC'; });
+  S.__mig.ladderLOC=1;
+  try{ localStorage.setItem(KEY,JSON.stringify(S)); }catch(e){}
+}
 ['personal','corp'].forEach(k=>{
   if(!S[k]) return;
   if(!S[k].subs) S[k].subs={수입:{},지출:{}};
