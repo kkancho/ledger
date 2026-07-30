@@ -187,6 +187,18 @@ body.corp nav.bn button.on{color:var(--corp)}
   background:#fffbeb;border-radius:7px;padding:7px 9px}
 .repayList{margin-top:8px;padding-top:6px;border-top:1px dashed var(--line)}
 .tag.bs{background:var(--asset)}
+/* 분류·결제수단 추가 */
+.addRow{display:flex;gap:6px;align-items:stretch}
+.addRow select{flex:1;min-width:0}
+.addBtn{flex:0 0 auto;padding:0 12px;border:1px solid var(--line);background:#fff;
+  border-radius:9px;font-size:12.5px;font-weight:700;color:var(--ink);
+  cursor:pointer;font-family:inherit;white-space:nowrap}
+.addBtn:active{background:#f5f5f4}
+.sug{margin-top:8px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:9px;
+  padding:9px 11px;font-size:12.5px;color:var(--ink);cursor:pointer;line-height:1.5}
+.sug b{background:var(--in);color:#fff;font-size:10.5px;padding:1px 6px;
+  border-radius:4px;margin-right:4px}
+.sugGo{float:right;font-size:11.5px;font-weight:800;color:var(--in)}
 </style>
 </head>
 <body class="personal">
@@ -225,12 +237,57 @@ function save(){
 }
 
 /* ═══════════════ 카테고리 정의 ═══════════════ */
-// 불로소득 = 자산이 스스로 만들어내는 수입
-const PASSIVE=['임대료 수입','배당금','이자','로열티'];
+// 불로소득 = 자산이 스스로 만들어내는 수입  (뒤 4개는 구버전 데이터 호환)
+const PASSIVE=['임대소득','금융소득','저작·로열티','임대료 수입','배당금','이자','로열티'];
+
+/* ── 2단 분류 기본값 ──
+   대분류(1depth) → 소분류(2depth).  사용자가 추가한 소분류는 S[mode].subs 에 저장되어 합쳐진다 */
+const SUB={
+  personal:{
+    지출:{
+      '용돈/기타':['용돈','기타'],
+      '식비':['주식','부식','간식','외식','커피/음료','술/유흥','식재료','기타'],
+      '주거/통신':['관리비','공과금','이동통신','인터넷','월세','구독료','기타'],
+      '생활용품':['가구/가전','주방/욕실','잡화소모','기타'],
+      '의복/미용':['의류비','패션잡화','헤어/뷰티','세탁수선비','기타'],
+      '건강/문화':['운동/레저','문화생활','여행','병원비','기타'],
+      '교육/육아':['등록금','학원/교재비','육아용품','기타'],
+      '교통/차량':['대중교통비','주유비','충전비','택시','렌트','운반','기타'],
+      '경조사/회비':['경조사비','모임회비','데이트','선물','기타'],
+      '세금/이자':['세금','대출이자','기타'],
+      '카드대금':['카드대금'],
+      '저축/보험':['보험료'],
+      '미분류':[]
+    },
+    수입:{
+      '근로소득':['급여','상여','수당','기타'],
+      '사업소득':['사업매출','용역','기타'],
+      '임대소득':['월세','관리비','보증금이자','기타'],
+      '금융소득':['배당금','이자','분배금','기타'],
+      '저작·로열티':['로열티','인세','기타'],
+      '기타수입':['환급','중고판매','용돈','보험금','기타'],
+      '미분류':[]
+    }
+  },
+  corp:{지출:{},수입:{}}
+};
+// 소분류를 추가할 수 없는 대분류
+const NO_ADD=['미분류'];
+// 사용자 추가분을 합친 소분류 목록
+function subsOf(mode,kind,cat){
+  const base=((SUB[mode]||{})[kind]||{})[cat]||[];
+  const extra=(((S[mode]||{}).subs||{})[kind]||{})[cat]||[];
+  return [...base,...extra.filter(x=>!base.includes(x))];
+}
+// 결제수단 1depth
+const PAY_TYPES=['카드','현금','계좌이체'];
+function paysOf(mode,type){ return (((S[mode]||{}).pay||{})[type])||[]; }
+
 const CAT={
   personal:{
-    수입:['근로소득','임대료 수입','배당금','이자','로열티','사업소득','기타수입'],
-    지출:['세금','주택 융자금','대출 이자','생활비','식비','교통비','통신비','보험료','의료비','교육비','문화·여가','기타지출'],
+    수입:['근로소득','사업소득','임대소득','금융소득','저작·로열티','기타수입','미분류'],
+    지출:['용돈/기타','식비','주거/통신','생활용품','의복/미용','건강/문화','교육/육아',
+          '교통/차량','경조사/회비','세금/이자','카드대금','저축/보험','미분류'],
     자산:['부동산','주식','채권','어음','지적 자산','예금·현금','기타자산'],
     부채:['주택 융자','가계 대출','신용카드','개인 차용','기타부채']
   },
@@ -266,8 +323,10 @@ const TAXCAL=[
 /* ═══════════════ 초기 상태 ═══════════════ */
 function blank(){
   return{
-    personal:{tx:[],assets:[],debts:[],recur:[],splits:[]},
-    corp:{tx:[],assets:[],debts:[],recur:[],props:[],adv:[]}
+    personal:{tx:[],assets:[],debts:[],recur:[],splits:[],
+      subs:{수입:{},지출:{}}, pay:{카드:[],현금:['현금'],계좌이체:[]}},
+    corp:{tx:[],assets:[],debts:[],recur:[],props:[],adv:[],
+      subs:{수입:{},지출:{}}, pay:{카드:[],현금:['현금'],계좌이체:[]}}
   };
 }
 function sample(){
@@ -327,6 +386,14 @@ function u(){return Math.random().toString(36).slice(2,10)}
 let S=load()||blank();
 // 구버전 데이터 호환
 if(!S.personal.splits) S.personal.splits=[];
+['personal','corp'].forEach(k=>{
+  if(!S[k]) return;
+  if(!S[k].subs) S[k].subs={수입:{},지출:{}};
+  if(!S[k].subs.수입) S[k].subs.수입={};
+  if(!S[k].subs.지출) S[k].subs.지출={};
+  if(!S[k].pay) S[k].pay={카드:[],현금:['현금'],계좌이체:[]};
+  PAY_TYPES.forEach(t=>{ if(!Array.isArray(S[k].pay[t])) S[k].pay[t]=[]; });
+});
 let MODE='personal';
 let TAB='dash';
 let CUR=new Date();
@@ -896,6 +963,50 @@ function groupBy(arr,catKey,valKey){
   return Object.entries(g).sort((a,b)=>b[1]-a[1]);
 }
 
+/* ── 자동 추천 ──
+   과거 입력한 사용내역·사용처를 학습해서 분류와 결제수단을 제안한다.
+   저장하는 순간 자동으로 쌓이므로 따로 학습시킬 필요가 없다. */
+function normKey(s){ return (s||'').trim().toLowerCase().replace(/\s+/g,''); }
+function learnIndex(mode,kind){
+  const idx={};
+  (S[mode].tx||[]).forEach(t=>{
+    if(t.kind!==kind||t.bsOnly)return;
+    [t.place,t.desc].forEach(raw=>{
+      const k=normKey(raw); if(!k)return;
+      const e=idx[k]=idx[k]||{n:0,combos:{}};
+      e.n++;
+      const c=JSON.stringify([t.cat||'미분류',t.sub||'',t.payType||'',t.payName||'']);
+      e.combos[c]=(e.combos[c]||0)+1;
+    });
+  });
+  return idx;
+}
+// 사용내역·사용처 텍스트로 가장 많이 쓴 조합을 찾는다
+function suggestCat(mode,kind,text){
+  const k=normKey(text); if(!k)return null;
+  const idx=learnIndex(mode,kind);
+  let e=idx[k];
+  if(!e){                                    // 완전일치 없으면 부분일치
+    const hit=Object.keys(idx).filter(x=>x.includes(k)||k.includes(x))
+      .sort((a,b)=>idx[b].n-idx[a].n)[0];
+    if(!hit)return null; e=idx[hit];
+  }
+  const best=Object.entries(e.combos).sort((a,b)=>b[1]-a[1])[0];
+  if(!best)return null;
+  const [cat,sub,payType,payName]=JSON.parse(best[0]);
+  return{cat,sub,payType,payName,count:best[1]};
+}
+// 입력창 자동완성 후보 (많이 쓴 순)
+function pastValues(mode,kind,field){
+  const cnt={};
+  (S[mode].tx||[]).forEach(t=>{
+    if(t.kind!==kind||t.bsOnly)return;
+    const v=(t[field]||'').trim(); if(!v)return;
+    cnt[v]=(cnt[v]||0)+1;
+  });
+  return Object.entries(cnt).sort((a,b)=>b[1]-a[1]).map(x=>x[0]).slice(0,40);
+}
+
 /* ── 입력 ── */
 let addKind='지출';
 let RP_SEL=null;
@@ -952,6 +1063,95 @@ function addRepay(){
     bsOnly:true, debtId:d.id, repayId:rid, ev:'', evOk:true});
   save(); TAB='list'; render();
 }
+let TX_CAT=null, TX_SUB=null, TX_PAY='카드', TX_PAYNAME=null;
+
+// 소분류 선택칸 (사용자 추가 버튼 포함)
+function subField(cat){
+  const list=subsOf(MODE,addKind,cat);
+  const canAdd=!NO_ADD.includes(cat);
+  if(!list.length&&!canAdd) return `<input type="hidden" id="f_sub" value="">`;
+  if(!TX_SUB||!list.includes(TX_SUB)) TX_SUB=list[0]||'';
+  return `<label>소분류</label>
+    <div class="addRow">
+      <select id="f_sub" onchange="TX_SUB=this.value">
+        ${list.length?list.map(s=>`<option ${s===TX_SUB?'selected':''}>${s}</option>`).join('')
+          :'<option value="">(없음)</option>'}
+      </select>
+      ${canAdd?`<button type="button" class="addBtn" onclick="addSub('${cat}')">＋ 추가</button>`:''}
+    </div>`;
+}
+function onCatPick(cat){
+  TX_CAT=cat; TX_SUB=null;
+  const box=document.getElementById('subBox');
+  if(box) box.innerHTML=subField(cat);
+}
+function addSub(cat){
+  const name=(prompt(`"${cat}" 에 추가할 소분류 이름`)||'').trim();
+  if(!name)return;
+  if(subsOf(MODE,addKind,cat).includes(name)){alert('이미 있는 소분류입니다');return;}
+  const S1=S[MODE].subs=S[MODE].subs||{};
+  const K=S1[addKind]=S1[addKind]||{};
+  K[cat]=[...(K[cat]||[]),name];
+  TX_CAT=cat; TX_SUB=name; save();
+  const box=document.getElementById('subBox');
+  if(box) box.innerHTML=subField(cat);
+}
+
+// 결제수단 하위 (계좌·카드명)
+function payField(type){
+  const list=paysOf(MODE,type);
+  if(!TX_PAYNAME||!list.includes(TX_PAYNAME)) TX_PAYNAME=list[0]||'';
+  return `<div class="addRow">
+      <select id="f_payName" onchange="TX_PAYNAME=this.value">
+        ${list.length?list.map(s=>`<option ${s===TX_PAYNAME?'selected':''}>${s}</option>`).join('')
+          :`<option value="">＋ 로 ${type}명을 먼저 등록하세요</option>`}
+      </select>
+      <button type="button" class="addBtn" onclick="addPay('${type}')">＋ 추가</button>
+    </div>`;
+}
+function onPayPick(type){
+  TX_PAY=type; TX_PAYNAME=null;
+  const box=document.getElementById('payBox');
+  if(box) box.innerHTML=payField(type);
+}
+function addPay(type){
+  const ex={'카드':'예: 삼성카드 taptap','현금':'예: 지갑 현금','계좌이체':'예: 농협 주계좌'}[type]||'';
+  const name=(prompt(`추가할 ${type} 이름\n${ex}`)||'').trim();
+  if(!name)return;
+  if(paysOf(MODE,type).includes(name)){alert('이미 있는 항목입니다');return;}
+  S[MODE].pay=S[MODE].pay||{};
+  S[MODE].pay[type]=[...(S[MODE].pay[type]||[]),name];
+  TX_PAY=type; TX_PAYNAME=name; save();
+  const box=document.getElementById('payBox');
+  if(box) box.innerHTML=payField(type);
+}
+
+// 사용내역·사용처를 입력하면 과거 기록으로 분류를 자동 채운다
+let SUG_LOCK=false;
+function onDescInput(){
+  const g=id=>((document.getElementById(id)||{}).value||'');
+  const s=suggestCat(MODE,addKind,g('f_place')) || suggestCat(MODE,addKind,g('f_desc'));
+  const box=document.getElementById('sugBox');
+  if(!s){ if(box)box.innerHTML=''; return; }
+  if(box) box.innerHTML=`<div class="sug" onclick="applySug()">
+    <b>추천</b> ${s.cat}${s.sub?' › '+s.sub:''}${s.payName?' · '+s.payName:''}
+    <span class="muted">· ${s.count}회 사용</span> <span class="sugGo">적용 ›</span></div>`;
+  window.__SUG=s;
+  if(!SUG_LOCK) applySug(true);     // 사용자가 직접 고친 뒤엔 덮어쓰지 않는다
+}
+function applySug(silent){
+  const s=window.__SUG; if(!s)return;
+  const cs=document.getElementById('f_cat');
+  if(cs&&[...cs.options].some(o=>o.value===s.cat)){ cs.value=s.cat; onCatPick(s.cat); }
+  if(s.sub){ const ss=document.getElementById('f_sub');
+    if(ss&&[...ss.options].some(o=>o.value===s.sub)){ ss.value=s.sub; TX_SUB=s.sub; } }
+  if(s.payType){ const pt=document.getElementById('f_payType');
+    if(pt){ pt.value=s.payType; onPayPick(s.payType); } }
+  if(s.payName){ const pn=document.getElementById('f_payName');
+    if(pn&&[...pn.options].some(o=>o.value===s.payName)){ pn.value=s.payName; TX_PAYNAME=s.payName; } }
+  if(!silent) SUG_LOCK=true;
+}
+
 function vAdd(y,m){
   const today=new Date();
   const dv=`${y}-${String(m).padStart(2,'0')}-${String(Math.min(today.getDate(),daysIn(y,m))).padStart(2,'0')}`;
@@ -986,6 +1186,7 @@ function vAdd(y,m){
   }
 
   const cats=CAT[MODE][addKind]||[];
+  if(!TX_CAT||!cats.includes(TX_CAT)) TX_CAT=cats.includes('미분류')?'미분류':cats[0];
   return `<div class="card">
     <h3>거래 입력</h3>
     <label>구분</label>
@@ -996,10 +1197,30 @@ function vAdd(y,m){
     ${dateField('f_date',dv,'today')}
     <label>금액</label>
     <input type="number" id="f_amt" inputmode="numeric" placeholder="0">
-    <label>분류</label>
-    <select id="f_cat">${cats.map(c=>`<option>${c}</option>`).join('')}</select>
-    <label>메모 · 적요</label>
-    <input type="text" id="f_memo" placeholder="${MODE==='corp'?'예: 매입_장위동502호_잔금':'예: 장보기'}">
+
+    <label>사용내역 <span class="muted">(무엇을 했는지)</span></label>
+    <input type="text" id="f_desc" list="dl_desc" placeholder="예: 점심 김치찌개"
+      oninput="onDescInput()">
+    <datalist id="dl_desc">${pastValues(MODE,addKind,'desc').map(v=>`<option>${v}</option>`).join('')}</datalist>
+
+    <label>사용처 <span class="muted">(어디서)</span></label>
+    <input type="text" id="f_place" list="dl_place" placeholder="예: 김밥천국 장위점"
+      oninput="onDescInput()">
+    <datalist id="dl_place">${pastValues(MODE,addKind,'place').map(v=>`<option>${v}</option>`).join('')}</datalist>
+    <div id="sugBox"></div>
+
+    <label>분류 <span class="muted">(대분류)</span></label>
+    <select id="f_cat" onchange="onCatPick(this.value)">
+      ${cats.map(c=>`<option ${c===TX_CAT?'selected':''}>${c}</option>`).join('')}</select>
+    <div id="subBox">${subField(TX_CAT)}</div>
+
+    <label>출금계좌</label>
+    <select id="f_payType" onchange="onPayPick(this.value)">
+      ${PAY_TYPES.map(t=>`<option ${t===TX_PAY?'selected':''}>${t}</option>`).join('')}</select>
+    <div id="payBox">${payField(TX_PAY)}</div>
+
+    <label>메모</label>
+    <input type="text" id="f_memo" placeholder="${MODE==='corp'?'예: 매입_장위동502호_잔금':'남길 말이 있으면'}">
     ${MODE==='corp'?`
       <label>적격증빙</label>
       <select id="f_ev">${EVIDENCE.map(e=>`<option>${e}</option>`).join('')}</select>
@@ -1017,16 +1238,21 @@ function addTx(){
   if(!amt){alert('금액을 입력하세요');return;}
   const fd=getDate('f_date');
   if(!fd){alert('날짜를 모두 입력하세요 (년/월/일)');return;}
+  const g=id=>((document.getElementById(id)||{}).value||'');
   const t={id:u(),date:fd,kind:addKind,
-    cat:document.getElementById('f_cat').value,amt:amt,
-    memo:document.getElementById('f_memo').value};
+    cat:g('f_cat')||'미분류', sub:g('f_sub'), amt:amt,
+    desc:g('f_desc').trim(), place:g('f_place').trim(),
+    payType:g('f_payType'), payName:g('f_payName'),
+    memo:g('f_memo')};
   if(MODE==='corp'){
     t.ev=document.getElementById('f_ev').value;
     t.evOk=EV_OK.includes(t.ev);
     t.party=document.getElementById('f_party').value;
     t.prop=document.getElementById('f_prop').value;
   }
-  S[MODE].tx.push(t);save();TAB='list';render();
+  S[MODE].tx.push(t);
+  SUG_LOCK=false;                 // 다음 입력에서는 다시 자동 추천
+  save();TAB='list';render();
 }
 
 /* ── 내역 ── */
@@ -1044,11 +1270,12 @@ function vList(y,m){
         const c=t.kind==='수입'?'var(--in)':'var(--out)';
         return `<div class="item">
           <div class="ic" style="background:${t.bsOnly?'var(--asset)':c}">${t.bsOnly?'상':(t.kind==='수입'?'수':'지')}</div>
-          <div class="mid"><div class="n">${t.cat}
+          <div class="mid"><div class="n">${t.desc||t.cat}
             ${t.bsOnly?'<span class="tag bs">원금상환</span>':''}
             ${t.auto?`<span class="tag auto">${t.auto}</span>`:''}
             ${MODE==='corp'&&t.ev?`<span class="tag ${t.evOk?'good':'bad'}">${t.ev}</span>`:''}</div>
-            <div class="s">${t.memo||''}${t.party?' · '+t.party:''}${t.prop?' · '+t.prop:''}</div></div>
+            <div class="s">${[t.cat+(t.sub?' › '+t.sub:''), t.place, t.payName||t.payType,
+                t.memo, t.party, t.prop].filter(Boolean).join(' · ')}</div></div>
           <div class="amt" style="color:${c}">${t.kind==='수입'?'+':'−'}${won(t.amt).replace('원','')}</div>
           ${t.auto?'':`<button class="del" onclick="delTx('${t.id}')">×</button>`}
         </div>`;}).join('')}
